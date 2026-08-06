@@ -1,3 +1,5 @@
+use chrono::{TimeZone, Timelike};
+use chrono_tz::America::New_York;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -5,9 +7,20 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use reqwest::{Client, Url};
 
+fn add_days_ymd(date: &str, days: i64) -> Option<String> {
+    let parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
+    let shifted = parsed.checked_add_signed(chrono::Duration::days(days))?;
+    Some(shifted.format("%Y-%m-%d").to_string())
+}
+
 #[derive(Debug, Deserialize)]
 struct YahooChartResponse {
     chart: YahooChartContainer,
+}
+
+#[derive(Debug, Deserialize)]
+struct MassiveAggregatesResponse {
+    results: Option<Vec<AggregateBar>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,6 +40,8 @@ struct YahooChartResult {
 struct YahooChartMeta {
     regular_market_price: Option<f64>,
     previous_close: Option<f64>,
+    pre_market_price: Option<f64>,
+    pre_market_change_percent: Option<f64>,
     post_market_price: Option<f64>,
     post_market_change_percent: Option<f64>,
 }
@@ -73,6 +88,8 @@ struct YahooQuoteItem {
     regular_market_price: Option<f64>,
     regular_market_previous_close: Option<f64>,
     regular_market_change_percent: Option<f64>,
+    pre_market_price: Option<f64>,
+    pre_market_change_percent: Option<f64>,
     post_market_price: Option<f64>,
     post_market_change_percent: Option<f64>,
 }
@@ -82,6 +99,8 @@ struct SnapshotItem {
     ticker: String,
     price: f64,
     change_percent: f64,
+    pre_market_price: Option<f64>,
+    pre_market_change_percent: Option<f64>,
     post_market_price: Option<f64>,
     post_market_change_percent: Option<f64>,
 }
@@ -182,6 +201,18 @@ fn yahoo_news_base_url() -> String {
     std::env::var("YAHOO_NEWS_BASE_URL").unwrap_or_else(|_| "https://query2.finance.yahoo.com".to_string())
 }
 
+fn massive_base_url() -> String {
+    std::env::var("MASSIVE_BASE_URL")
+        .or_else(|_| std::env::var("POLYGON_BASE_URL"))
+        .unwrap_or_else(|_| "https://api.massive.com".to_string())
+}
+
+fn massive_api_key() -> Option<String> {
+    std::env::var("MASSIVE_API_KEY")
+        .or_else(|_| std::env::var("POLYGON_API_KEY"))
+        .ok()
+}
+
 fn yahoo_client() -> Result<&'static Client, String> {
     if let Some(client) = YAHOO_CLIENT.get() {
         return Ok(client);
@@ -209,6 +240,132 @@ fn rate_limit_error(prefix: &str, response: &reqwest::Response) -> String {
     format!("RATE_LIMITED:{}:retry_after={}", prefix, retry_after)
 }
 
+fn is_regular_market_bar(timestamp_ms: i64) -> bool {
+    let Some(dt) = New_York.timestamp_millis_opt(timestamp_ms).single() else {
+        return false;
+    };
+    let mins = dt.hour() * 60 + dt.minute();
+    let open = 9 * 60 + 30;
+    let close = 16 * 60;
+    mins >= open && mins <= close
+}
+
+fn interval_to_ms(multiplier: u16, timespan: &str) -> Option<i64> {
+    let base_ms = match timespan {
+        "minute" => 60_000_i64,
+        "hour" => 3_600_000_i64,
+        "day" => 86_400_000_i64,
+        "week" => 7 * 86_400_000_i64,
+        "month" => 30 * 86_400_000_i64,
+        _ => return None,
+    };
+
+    base_ms.checked_mul(multiplier as i64)
+}
+
+fn to_bucket(timestamp_ms: i64, bucket_ms: i64) -> i64 {
+    // Align to fixed buckets so slightly offset feed timestamps can still join.
+    timestamp_ms.div_euclid(bucket_ms)
+}
+
+fn is_premarket_bar(timestamp_ms: i64) -> bool {
+    let Some(dt) = New_York.timestamp_millis_opt(timestamp_ms).single() else {
+        return false;
+    };
+    let mins = dt.hour() * 60 + dt.minute();
+    let open = 9 * 60 + 30;
+    mins < open
+}
+
+fn overlay_volume_for_bucket(overlay: &HashMap<i64, f64>, bucket: i64) -> Option<f64> {
+    // Feeds can label intervals differently (start vs end), so allow adjacent bucket fallback.
+    let candidates = [bucket, bucket - 1, bucket + 1];
+    candidates
+        .iter()
+        .filter_map(|candidate| overlay.get(candidate).copied())
+        .filter(|volume| *volume > 0.0)
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+async fn fetch_massive_volume_overlay(
+    ticker: &str,
+    multiplier: u16,
+    timespan: &str,
+    from: &str,
+    to: &str,
+) -> Result<HashMap<i64, f64>, String> {
+    let Some(api_key) = massive_api_key() else {
+        return Ok(HashMap::new());
+    };
+
+    let overlay_to = add_days_ymd(to, 1).unwrap_or_else(|| to.to_string());
+    debug_log(&format!(
+        "aggs:massive-req ticker={} multiplier={} timespan={} from={} to={} overlay_to={}",
+        ticker, multiplier, timespan, from, to, overlay_to
+    ));
+
+    let mut url = Url::parse(&format!(
+        "{}/v2/aggs/ticker/{}/range/{}/{}/{}/{}",
+        massive_base_url(), ticker, multiplier, timespan, from, overlay_to
+    ))
+    .map_err(|err| format!("Bad Massive aggs URL: {}", err))?;
+
+    url.query_pairs_mut()
+        .append_pair("adjusted", "true")
+        .append_pair("sort", "asc")
+        .append_pair("limit", "50000")
+        .append_pair("apiKey", &api_key);
+
+    let client = yahoo_client()?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|err| format!("Massive network error: {}", err))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Massive API error: HTTP {}", response.status()));
+    }
+
+    let payload = response
+        .json::<MassiveAggregatesResponse>()
+        .await
+        .map_err(|err| format!("Failed to parse Massive aggregate response: {}", err))?;
+
+    let Some(bucket_ms) = interval_to_ms(multiplier, timespan) else {
+        return Ok(HashMap::new());
+    };
+
+    let rows = payload.results.unwrap_or_default();
+    if let (Some(first), Some(last)) = (rows.first(), rows.last()) {
+        debug_log(&format!(
+            "aggs:massive-window first_t={} last_t={} count={}",
+            first.t,
+            last.t,
+            rows.len()
+        ));
+    }
+
+    let mut by_bucket: HashMap<i64, f64> = HashMap::new();
+    for bar in rows {
+        if bar.v <= 0.0 {
+            continue;
+        }
+
+        let bucket = to_bucket(bar.t, bucket_ms);
+        by_bucket
+            .entry(bucket)
+            .and_modify(|current| {
+                if bar.v > *current {
+                    *current = bar.v;
+                }
+            })
+            .or_insert(bar.v);
+    }
+
+    Ok(by_bucket)
+}
+
 async fn fetch_snapshot_from_chart(client: &Client, ticker: &str) -> SnapshotItem {
     let mut url = match Url::parse(&format!("{}/v8/finance/chart/{}", yahoo_base_url(), ticker)) {
         Ok(value) => value,
@@ -217,6 +374,8 @@ async fn fetch_snapshot_from_chart(client: &Client, ticker: &str) -> SnapshotIte
                 ticker: ticker.to_string(),
                 price: 0.0,
                 change_percent: 0.0,
+                pre_market_price: None,
+                pre_market_change_percent: None,
                 post_market_price: None,
                 post_market_change_percent: None,
             }
@@ -235,6 +394,8 @@ async fn fetch_snapshot_from_chart(client: &Client, ticker: &str) -> SnapshotIte
                 ticker: ticker.to_string(),
                 price: 0.0,
                 change_percent: 0.0,
+                pre_market_price: None,
+                pre_market_change_percent: None,
                 post_market_price: None,
                 post_market_change_percent: None,
             }
@@ -246,6 +407,8 @@ async fn fetch_snapshot_from_chart(client: &Client, ticker: &str) -> SnapshotIte
             ticker: ticker.to_string(),
             price: 0.0,
             change_percent: 0.0,
+            pre_market_price: None,
+            pre_market_change_percent: None,
             post_market_price: None,
             post_market_change_percent: None,
         };
@@ -258,6 +421,8 @@ async fn fetch_snapshot_from_chart(client: &Client, ticker: &str) -> SnapshotIte
                 ticker: ticker.to_string(),
                 price: 0.0,
                 change_percent: 0.0,
+                pre_market_price: None,
+                pre_market_change_percent: None,
                 post_market_price: None,
                 post_market_change_percent: None,
             }
@@ -270,6 +435,8 @@ async fn fetch_snapshot_from_chart(client: &Client, ticker: &str) -> SnapshotIte
             ticker: ticker.to_string(),
             price: 0.0,
             change_percent: 0.0,
+            pre_market_price: None,
+            pre_market_change_percent: None,
             post_market_price: None,
             post_market_change_percent: None,
         };
@@ -277,6 +444,8 @@ async fn fetch_snapshot_from_chart(client: &Client, ticker: &str) -> SnapshotIte
 
     let close_from_meta = chart.meta.as_ref().and_then(|meta| meta.regular_market_price);
     let prev_close = chart.meta.as_ref().and_then(|meta| meta.previous_close);
+    let pre_market_price = chart.meta.as_ref().and_then(|meta| meta.pre_market_price);
+    let pre_market_change_percent = chart.meta.as_ref().and_then(|meta| meta.pre_market_change_percent);
     let post_market_price = chart.meta.as_ref().and_then(|meta| meta.post_market_price);
     let post_market_change_percent = chart
         .meta
@@ -305,6 +474,8 @@ async fn fetch_snapshot_from_chart(client: &Client, ticker: &str) -> SnapshotIte
         ticker: ticker.to_string(),
         price,
         change_percent,
+        pre_market_price,
+        pre_market_change_percent,
         post_market_price,
         post_market_change_percent,
     }
@@ -475,7 +646,7 @@ async fn fetch_polygon_aggregates(
         .await
         .map_err(|err| format!("Failed to parse Yahoo chart response: {}", err))?;
 
-    let results = payload
+    let mut results = payload
         .chart
         .result
         .unwrap_or_default()
@@ -530,6 +701,74 @@ async fn fetch_polygon_aggregates(
             Some(bars)
         })
         .unwrap_or_default();
+
+    let bucket_ms = interval_to_ms(multiplier, &timespan);
+
+    match fetch_massive_volume_overlay(&ticker, multiplier, &timespan, &from, &to).await {
+        Ok(overlay) => {
+            if !overlay.is_empty() {
+                let mut patched = 0_usize;
+                let mut patched_premarket = 0_usize;
+                let mut patched_after_hours = 0_usize;
+                if let Some(bucket_ms) = bucket_ms {
+                    for bar in &mut results {
+                        if bar.v <= 0.0 {
+                            let bucket = to_bucket(bar.t, bucket_ms);
+                            if let Some(volume) = overlay_volume_for_bucket(&overlay, bucket) {
+                                bar.v = volume;
+                                patched += 1;
+                                if is_premarket_bar(bar.t) {
+                                    patched_premarket += 1;
+                                } else if !is_regular_market_bar(bar.t) {
+                                    patched_after_hours += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                debug_log(&format!(
+                    "aggs:massive-overlay points={} patched_zero_volume={} patched_premarket={} patched_after_hours={} bucket_ms={}",
+                    overlay.len(),
+                    patched,
+                    patched_premarket,
+                    patched_after_hours,
+                    bucket_ms.unwrap_or(0)
+                ));
+            }
+        }
+        Err(err) => {
+            debug_log(&format!("aggs:massive-overlay-unavailable {}", err));
+        }
+    }
+
+    if !results.is_empty() {
+        let regular_count = results.iter().filter(|bar| is_regular_market_bar(bar.t)).count();
+        let after_hours: Vec<&AggregateBar> = results
+            .iter()
+            .filter(|bar| !is_regular_market_bar(bar.t))
+            .collect();
+        let after_count = after_hours.len();
+        let after_non_zero = after_hours.iter().filter(|bar| bar.v > 0.0).count();
+        let after_max_volume = after_hours
+            .iter()
+            .fold(0.0_f64, |max, bar| if bar.v > max { bar.v } else { max });
+        let sample: Vec<String> = after_hours
+            .iter()
+            .rev()
+            .take(8)
+            .map(|bar| format!("t={} v={}", bar.t, bar.v))
+            .collect();
+
+        debug_log(&format!(
+            "aggs:session regular={} after={} after_non_zero={} after_max_vol={} after_sample=[{}]",
+            regular_count,
+            after_count,
+            after_non_zero,
+            after_max_volume,
+            sample.join(", ")
+        ));
+    }
 
     if let Some(last) = results.last() {
         debug_log(&format!("aggs:count {} last_t {}", results.len(), last.t));
@@ -619,6 +858,8 @@ async fn fetch_polygon_snapshots(tickers: Vec<String>) -> Result<Vec<SnapshotIte
                         ticker: ticker.clone(),
                         price,
                         change_percent,
+                        pre_market_price: item.pre_market_price,
+                        pre_market_change_percent: item.pre_market_change_percent,
                         post_market_price: item.post_market_price,
                         post_market_change_percent: item.post_market_change_percent,
                     };
@@ -632,6 +873,8 @@ async fn fetch_polygon_snapshots(tickers: Vec<String>) -> Result<Vec<SnapshotIte
                         ticker,
                         price: 0.0,
                         change_percent: 0.0,
+                        pre_market_price: None,
+                        pre_market_change_percent: None,
                         post_market_price: None,
                         post_market_change_percent: None,
                     });
@@ -745,6 +988,7 @@ pub fn run() {
         .manage(StreamState)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             fetch_polygon_aggregates,
             fetch_polygon_snapshots,

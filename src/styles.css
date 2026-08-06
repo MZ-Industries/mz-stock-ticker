@@ -133,6 +133,24 @@ body {
   align-items: center;
 }
 
+.watch-row-wrap.dragging {
+  opacity: 0.55;
+}
+
+.watch-row-wrap.dragging .watch-row {
+  cursor: grabbing;
+}
+
+.watch-row-wrap.drag-over-top {
+  border-top: 2px solid rgba(45, 212, 191, 0.9);
+  border-radius: 10px;
+}
+
+.watch-row-wrap.drag-over-bottom {
+  border-bottom: 2px solid rgba(45, 212, 191, 0.9);
+  border-radius: 10px;
+}
+
 .watch-row {
   display: flex;
   align-items: center;
@@ -143,7 +161,8 @@ body {
   border: 1px solid transparent;
   border-radius: 12px;
   padding: 10px 12px;
-  cursor: pointer;
+  cursor: grab;
+  user-select: none;
 }
 
 .watch-remove {
@@ -253,6 +272,7 @@ p {
 }
 
 .range-group,
+.interval-group,
 .type-group {
   display: flex;
   gap: 8px;

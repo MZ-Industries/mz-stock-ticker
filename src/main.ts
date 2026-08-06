@@ -44,6 +44,8 @@ type SnapshotItem = {
   ticker: string;
   price: number;
   change_percent: number;
+  pre_market_price?: number;
+  pre_market_change_percent?: number;
   post_market_price?: number;
   post_market_change_percent?: number;
 };
@@ -70,6 +72,9 @@ type AppPrefs = {
   ticker: string;
   rangeLabel: string;
   chartType: ChartType;
+  candleIntervalKey?: string;
+  watchlistSymbols?: string[];
+  visibleRangesByViewKey?: Record<string, { from: number; to: number }>;
   sidebarWidth: number;
   pricePaneHeight: number;
   chartAreaHeight: number;
@@ -98,6 +103,8 @@ const DEFAULT_WATCHLIST = [
 ];
 
 const WATCHLIST_STORAGE_KEY = "watchlistSymbols";
+const WINDOW_LAYOUT_STORAGE_KEY = "windowLayoutV1";
+const MAX_STORED_VISIBLE_RANGES = 120;
 
 const RANGES: RangePreset[] = [
   { label: "1D", days: 1, multiplier: 1, timespan: "minute" },
@@ -109,9 +116,27 @@ const RANGES: RangePreset[] = [
   { label: "ALL", days: 1800, multiplier: 1, timespan: "day" },
 ];
 
+type CandleIntervalOption = {
+  key: string;
+  label: string;
+  multiplier: number;
+  timespan: "minute" | "hour";
+};
+
+const CANDLE_INTERVAL_OPTIONS: CandleIntervalOption[] = [
+  { key: "1m", label: "1m", multiplier: 1, timespan: "minute" },
+  { key: "2m", label: "2m", multiplier: 2, timespan: "minute" },
+  { key: "5m", label: "5m", multiplier: 5, timespan: "minute" },
+  { key: "15m", label: "15m", multiplier: 15, timespan: "minute" },
+  { key: "30m", label: "30m", multiplier: 30, timespan: "minute" },
+  { key: "60m", label: "60m", multiplier: 60, timespan: "minute" },
+  { key: "90m", label: "90m", multiplier: 90, timespan: "minute" },
+];
+
 let selectedTicker = "AAPL";
 let selectedRange = RANGES[2];
 let selectedChartType: ChartType = "candlestick";
+let selectedCandleIntervalKey = "5m";
 let watchlistSymbols = [...DEFAULT_WATCHLIST];
 let latestBars: AggregateBar[] = [];
 let activeSessionDate: string | null = null;
@@ -124,22 +149,38 @@ let prefsStore: Store | null = null;
 let unlistenAggregate: (() => void) | null = null;
 let apiCooldownUntilMs = 0;
 let latestSnapshotsByTicker = new Map<string, SnapshotItem>();
+let draggingTicker: string | null = null;
+let draggingPointerId: number | null = null;
+let draggingStarted = false;
+let draggingStartY = 0;
+let pendingDropInfo: { targetTicker: string; placeAfter: boolean } | null = null;
+let suppressWatchlistClick = false;
 let refreshInFlightCount = 0;
 let refreshProgressRaf: number | null = null;
 let lastRefreshFinishedAtMs = Date.now();
 let windowLayoutSaveTimer: number | null = null;
+let windowLayoutPeriodicTimer: number | null = null;
 let unlistenWindowMoved: (() => void) | null = null;
 let unlistenWindowResized: (() => void) | null = null;
+let unlistenDomResize: (() => void) | null = null;
 let persistedVisibleRange: { from: number; to: number } | null = null;
 let persistedVisibleRangeKey: string | null = null;
+let visibleRangeSaveTimer: number | null = null;
 
 const AUTO_REFRESH_PROGRESS_WINDOW_MS = 60_000;
 const WINDOW_LAYOUT_SAVE_DEBOUNCE_MS = 800;
+const WINDOW_LAYOUT_PERIODIC_SAVE_MS = 15_000;
+const USE_NATIVE_WINDOW_STATE = true;
+const MIN_PRICE_PANE_RATIO = 0.4;
+const MAX_PRICE_PANE_RATIO = 0.9;
+const MIN_CHART_AREA_RATIO = 0.35;
+const MAX_CHART_AREA_RATIO = 0.85;
 
 const defaultPrefs: AppPrefs = {
   ticker: "AAPL",
   rangeLabel: "1M",
   chartType: "candlestick",
+  candleIntervalKey: "5m",
   sidebarWidth: 280,
   pricePaneHeight: 0,
   chartAreaHeight: 0,
@@ -191,6 +232,7 @@ root.innerHTML = `
       </header>
       <div class="controls">
         <div class="range-group" id="range-group"></div>
+        <div class="interval-group hidden" id="interval-group"></div>
         <div class="type-group" id="type-group"></div>
       </div>
       <div class="chart-stack" id="chart-stack">
@@ -215,6 +257,7 @@ const watchlistListEl = document.querySelector("#watchlist-list") as HTMLDivElem
 const watchlistAddFormEl = document.querySelector("#watchlist-add-form") as HTMLFormElement;
 const watchlistAddInputEl = document.querySelector("#watchlist-add-input") as HTMLInputElement;
 const rangeGroupEl = document.querySelector("#range-group") as HTMLDivElement;
+const intervalGroupEl = document.querySelector("#interval-group") as HTMLDivElement;
 const typeGroupEl = document.querySelector("#type-group") as HTMLDivElement;
 const headlinePriceEl = document.querySelector("#headline-price") as HTMLParagraphElement;
 const headlineChangeEl = document.querySelector("#headline-change") as HTMLParagraphElement;
@@ -224,6 +267,7 @@ const closePriceEl = document.querySelector("#close-price") as HTMLParagraphElem
 const closeChangeEl = document.querySelector("#close-change") as HTMLParagraphElement;
 const afterPriceEl = document.querySelector("#after-price") as HTMLParagraphElement;
 const afterChangeEl = document.querySelector("#after-change") as HTMLParagraphElement;
+const afterLabelEl = afterChangeEl.nextElementSibling as HTMLParagraphElement;
 const refreshProgressEl = document.querySelector("#refresh-progress") as HTMLDivElement;
 const refreshProgressFillEl = document.querySelector("#refresh-progress-fill") as HTMLDivElement;
 
@@ -283,6 +327,21 @@ function clamp(min: number, max: number, value: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function normalizeStoredRatio(
+  stored: number,
+  containerSizePx: number,
+  minRatio: number,
+  maxRatio: number,
+): number {
+  if (!Number.isFinite(stored) || stored <= 0) {
+    return clamp(minRatio, maxRatio, (minRatio + maxRatio) / 2);
+  }
+
+  // Backward compatibility: old values were saved as pixels.
+  const ratio = stored > 1 ? stored / Math.max(1, containerSizePx) : stored;
+  return clamp(minRatio, maxRatio, ratio);
+}
+
 function currentChartViewKey(): string {
   return `${selectedTicker}:${selectedRange.label}`;
 }
@@ -338,35 +397,162 @@ function normalizeTicker(raw: string): string | null {
   return valid ? ticker : null;
 }
 
-function loadWatchlistSymbols(): void {
-  try {
-    const raw = localStorage.getItem(WATCHLIST_STORAGE_KEY);
-    if (!raw) {
-      watchlistSymbols = [...DEFAULT_WATCHLIST];
-      return;
-    }
-
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      watchlistSymbols = [...DEFAULT_WATCHLIST];
-      return;
-    }
-
-    const normalized = parsed
-      .map((value) => (typeof value === "string" ? normalizeTicker(value) : null))
-      .filter((value): value is string => Boolean(value));
-
-    watchlistSymbols = [...new Set(normalized)].slice(0, 60);
-    if (watchlistSymbols.length === 0) {
-      watchlistSymbols = [...DEFAULT_WATCHLIST];
-    }
-  } catch {
-    watchlistSymbols = [...DEFAULT_WATCHLIST];
+function normalizeWatchlistSymbols(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    return [];
   }
+
+  const normalized = input
+    .map((value) => (typeof value === "string" ? normalizeTicker(value) : null))
+    .filter((value): value is string => Boolean(value));
+
+  return [...new Set(normalized)].slice(0, 60);
+}
+
+function parseStoredJson(key: string): unknown | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      return null;
+    }
+
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeWindowLayout(input: unknown): AppPrefs["windowLayout"] | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+
+  const candidate = input as AppPrefs["windowLayout"];
+  if (
+    Number.isFinite(candidate?.x)
+    && Number.isFinite(candidate?.y)
+    && Number.isFinite(candidate?.width)
+    && Number.isFinite(candidate?.height)
+    && typeof candidate?.maximized === "boolean"
+  ) {
+    return {
+      x: candidate.x,
+      y: candidate.y,
+      width: candidate.width,
+      height: candidate.height,
+      maximized: candidate.maximized,
+    };
+  }
+
+  return null;
+}
+
+function normalizeVisibleRange(value: unknown): { from: number; to: number } | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as { from?: number; to?: number };
+  const from = Number(candidate.from);
+  const to = Number(candidate.to);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) {
+    return null;
+  }
+
+  return {
+    from,
+    to,
+  };
+}
+
+function normalizeVisibleRangesByViewKey(input: unknown): Record<string, { from: number; to: number }> {
+  if (!input || typeof input !== "object") {
+    return {};
+  }
+
+  const entries = Object.entries(input as Record<string, unknown>);
+  const normalizedEntries = entries
+    .map(([key, value]) => {
+      const normalized = normalizeVisibleRange(value);
+      return normalized ? ([key, normalized] as const) : null;
+    })
+    .filter((entry): entry is readonly [string, { from: number; to: number }] => Boolean(entry));
+
+  return Object.fromEntries(normalizedEntries);
+}
+
+function hydrateVisibleRangeStateForCurrentView(): void {
+  const rangesByViewKey = normalizeVisibleRangesByViewKey(prefs.visibleRangesByViewKey);
+  prefs.visibleRangesByViewKey = rangesByViewKey;
+
+  const key = currentChartViewKey();
+  const range = rangesByViewKey[key];
+  persistedVisibleRangeKey = key;
+  persistedVisibleRange = range ?? null;
+}
+
+function upsertVisibleRangeForViewKey(viewKey: string, range: { from: number; to: number }): void {
+  const existing = normalizeVisibleRangesByViewKey(prefs.visibleRangesByViewKey);
+  const next = {
+    ...existing,
+    [viewKey]: range,
+  };
+
+  const keys = Object.keys(next);
+  if (keys.length > MAX_STORED_VISIBLE_RANGES) {
+    const oldestKey = keys[0];
+    delete next[oldestKey];
+  }
+
+  prefs.visibleRangesByViewKey = next;
+}
+
+function persistVisibleRangeForCurrentView(range: { from: number; to: number } | null): void {
+  if (!range) {
+    return;
+  }
+
+  const key = currentChartViewKey();
+  persistedVisibleRangeKey = key;
+  persistedVisibleRange = {
+    from: range.from,
+    to: range.to,
+  };
+
+  upsertVisibleRangeForViewKey(key, persistedVisibleRange);
+  persistPrefs();
+}
+
+function schedulePersistVisibleRangeForCurrentView(range: { from: number; to: number } | null): void {
+  if (!range) {
+    return;
+  }
+
+  const normalized = {
+    from: range.from,
+    to: range.to,
+  };
+
+  if (visibleRangeSaveTimer !== null) {
+    window.clearTimeout(visibleRangeSaveTimer);
+  }
+
+  visibleRangeSaveTimer = window.setTimeout(() => {
+    visibleRangeSaveTimer = null;
+    persistVisibleRangeForCurrentView(normalized);
+  }, 250);
+}
+
+function loadWatchlistSymbolsFromLocalStorage(): string[] {
+  const parsed = parseStoredJson(WATCHLIST_STORAGE_KEY);
+  return normalizeWatchlistSymbols(parsed);
 }
 
 function persistWatchlistSymbols(): void {
   localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(watchlistSymbols));
+
+  prefs.watchlistSymbols = [...watchlistSymbols];
+  persistPrefs();
 }
 
 function ensureSelectedTicker(): void {
@@ -385,16 +571,20 @@ function renderWatchlistRows(pricesByTicker?: Map<string, SnapshotItem>): void {
     const hasAfterHours = item
       && Number.isFinite(item.post_market_price)
       && Number.isFinite(item.post_market_change_percent);
-    const displayPrice = hasAfterHours ? (item?.post_market_price as number) : item?.price;
-    const displayChange = hasAfterHours ? (item?.post_market_change_percent as number) : item?.change_percent;
+    const hasPreMarket = !hasAfterHours
+      && item
+      && Number.isFinite(item.pre_market_price)
+      && Number.isFinite(item.pre_market_change_percent);
+    const displayPrice = hasAfterHours ? (item?.post_market_price as number) : hasPreMarket ? (item?.pre_market_price as number) : item?.price;
+    const displayChange = hasAfterHours ? (item?.post_market_change_percent as number) : hasPreMarket ? (item?.pre_market_change_percent as number) : item?.change_percent;
     const price = displayPrice !== undefined ? fmtNumber(displayPrice) : "--";
     const change = displayChange !== undefined ? fmtPct(displayChange) : "--";
     const cls = displayChange !== undefined && displayChange >= 0 ? "up" : "down";
-    const sessionLabel = hasAfterHours ? " AH" : "";
+    const sessionLabel = hasAfterHours ? " AH" : hasPreMarket ? " PM" : "";
     const selected = ticker === selectedTicker ? "selected" : "";
 
     return `
-      <div class="watch-row-wrap">
+      <div class="watch-row-wrap" data-order-ticker="${ticker}" title="Drag to reorder ${ticker}">
         <button class="watch-row ${selected}" data-ticker="${ticker}">
           <span>${ticker}</span>
           <span class="watch-meta ${cls}">${price} · ${change}${sessionLabel}</span>
@@ -406,11 +596,30 @@ function renderWatchlistRows(pricesByTicker?: Map<string, SnapshotItem>): void {
 }
 
 async function initStore(): Promise<void> {
-  loadWatchlistSymbols();
-
   prefsStore = await Store.load("ui-preferences.json");
   const stored = await prefsStore.get<AppPrefs>("dashboard");
   prefs = { ...defaultPrefs, ...(stored ?? {}) };
+
+  const storeWatchlist = normalizeWatchlistSymbols(prefs.watchlistSymbols);
+  const localWatchlist = loadWatchlistSymbolsFromLocalStorage();
+  watchlistSymbols = storeWatchlist.length > 0
+    ? storeWatchlist
+    : localWatchlist.length > 0
+      ? localWatchlist
+      : [...DEFAULT_WATCHLIST];
+
+  // Backfill missing store data (and keep migration source in sync).
+  prefs.watchlistSymbols = [...watchlistSymbols];
+  localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(watchlistSymbols));
+
+  if (!normalizeWindowLayout(prefs.windowLayout)) {
+    const legacyLayout = normalizeWindowLayout(parseStoredJson(WINDOW_LAYOUT_STORAGE_KEY));
+    if (legacyLayout) {
+      prefs.windowLayout = legacyLayout;
+    }
+  }
+
+  localStorage.removeItem(WINDOW_LAYOUT_STORAGE_KEY);
 
   if (watchlistSymbols.includes(prefs.ticker)) {
     selectedTicker = prefs.ticker;
@@ -427,16 +636,40 @@ async function initStore(): Promise<void> {
     selectedChartType = prefs.chartType;
   }
 
+  if (prefs.candleIntervalKey && CANDLE_INTERVAL_OPTIONS.some((item) => item.key === prefs.candleIntervalKey)) {
+    selectedCandleIntervalKey = prefs.candleIntervalKey;
+  }
+
+  hydrateVisibleRangeStateForCurrentView();
+  persistPrefs();
+
   const shell = document.querySelector(".app-shell") as HTMLDivElement;
+  const mainPanel = document.querySelector(".main-panel") as HTMLDivElement;
   const chartStack = document.querySelector("#chart-stack") as HTMLDivElement;
   if (prefs.sidebarWidth > 0) {
     shell.style.setProperty("--sidebar-width", `${clamp(210, 420, prefs.sidebarWidth)}px`);
   }
   if (prefs.pricePaneHeight > 0) {
-    chartStack.style.setProperty("--price-pane-height", `${clamp(220, 900, prefs.pricePaneHeight)}px`);
+    const chartStackHeight = chartStack.getBoundingClientRect().height || window.innerHeight;
+    const ratio = normalizeStoredRatio(
+      prefs.pricePaneHeight,
+      chartStackHeight,
+      MIN_PRICE_PANE_RATIO,
+      MAX_PRICE_PANE_RATIO,
+    );
+    chartStack.style.setProperty("--price-pane-height", `${(ratio * 100).toFixed(3)}%`);
+    prefs.pricePaneHeight = ratio;
   }
   if (prefs.chartAreaHeight > 0) {
-    shell.style.setProperty("--chart-area-height", `${clamp(320, 1200, prefs.chartAreaHeight)}px`);
+    const mainPanelHeight = mainPanel.getBoundingClientRect().height || window.innerHeight;
+    const ratio = normalizeStoredRatio(
+      prefs.chartAreaHeight,
+      mainPanelHeight,
+      MIN_CHART_AREA_RATIO,
+      MAX_CHART_AREA_RATIO,
+    );
+    shell.style.setProperty("--chart-area-height", `${(ratio * 100).toFixed(3)}%`);
+    prefs.chartAreaHeight = ratio;
   }
 }
 
@@ -449,34 +682,46 @@ function persistPrefs(): void {
 }
 
 async function captureWindowLayout(): Promise<void> {
-  const appWindow = getCurrentWindow();
-  const maximized = await appWindow.isMaximized();
-
-  if (maximized && prefs.windowLayout) {
-    prefs.windowLayout = {
-      ...prefs.windowLayout,
-      maximized: true,
-    };
-    persistPrefs();
+  if (USE_NATIVE_WINDOW_STATE) {
     return;
   }
 
-  const [position, size] = await Promise.all([
-    appWindow.outerPosition(),
-    appWindow.innerSize(),
-  ]);
+  try {
+    const appWindow = getCurrentWindow();
+    const maximized = await appWindow.isMaximized();
 
-  prefs.windowLayout = {
-    x: position.x,
-    y: position.y,
-    width: size.width,
-    height: size.height,
-    maximized,
-  };
-  persistPrefs();
+    if (maximized && prefs.windowLayout) {
+      prefs.windowLayout = {
+        ...prefs.windowLayout,
+        maximized: true,
+      };
+      persistPrefs();
+      return;
+    }
+
+    const [position, size] = await Promise.all([
+      appWindow.outerPosition(),
+      appWindow.innerSize(),
+    ]);
+
+    prefs.windowLayout = {
+      x: position.x,
+      y: position.y,
+      width: size.width,
+      height: size.height,
+      maximized,
+    };
+    persistPrefs();
+  } catch (error) {
+    debugLog("window:capture-failed", String(error));
+  }
 }
 
 function scheduleWindowLayoutSave(): void {
+  if (USE_NATIVE_WINDOW_STATE) {
+    return;
+  }
+
   if (windowLayoutSaveTimer !== null) {
     window.clearTimeout(windowLayoutSaveTimer);
   }
@@ -488,20 +733,35 @@ function scheduleWindowLayoutSave(): void {
 }
 
 async function restoreWindowLayout(): Promise<void> {
+  if (USE_NATIVE_WINDOW_STATE) {
+    return;
+  }
+
   const layout = prefs.windowLayout;
   if (!layout) {
     return;
   }
 
   const appWindow = getCurrentWindow();
-  await appWindow.setPosition(new PhysicalPosition(layout.x, layout.y));
-  await appWindow.setSize(new PhysicalSize(layout.width, layout.height));
-  if (layout.maximized) {
-    await appWindow.maximize();
+  try {
+    await appWindow.setPosition(new PhysicalPosition(layout.x, layout.y));
+    await appWindow.setSize(new PhysicalSize(layout.width, layout.height));
+    if (layout.maximized) {
+      await appWindow.maximize();
+    }
+  } catch (error) {
+    debugLog("window:restore-failed", {
+      error: String(error),
+      layout,
+    });
   }
 }
 
 async function initWindowLayoutPersistence(): Promise<void> {
+  if (USE_NATIVE_WINDOW_STATE) {
+    return;
+  }
+
   const appWindow = getCurrentWindow();
   unlistenWindowMoved = await appWindow.onMoved(() => {
     scheduleWindowLayoutSave();
@@ -509,6 +769,21 @@ async function initWindowLayoutPersistence(): Promise<void> {
   unlistenWindowResized = await appWindow.onResized(() => {
     scheduleWindowLayoutSave();
   });
+
+  const onDomResize = () => {
+    scheduleWindowLayoutSave();
+  };
+  window.addEventListener("resize", onDomResize);
+  unlistenDomResize = () => {
+    window.removeEventListener("resize", onDomResize);
+  };
+
+  windowLayoutPeriodicTimer = window.setInterval(() => {
+    scheduleWindowLayoutSave();
+  }, WINDOW_LAYOUT_PERIODIC_SAVE_MS);
+
+  // Seed at least one persisted layout early in the session.
+  scheduleWindowLayoutSave();
 }
 
 function fmtNumber(value: number): string {
@@ -521,6 +796,28 @@ function fmtNumber(value: number): string {
 function fmtPct(value: number): string {
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(2)}%`;
+}
+
+function isCandleIntervalRelevant(): boolean {
+  const supportsType = selectedChartType === "candlestick" || selectedChartType === "bar";
+  const supportsRange = selectedRange.timespan === "minute";
+  return supportsType && supportsRange;
+}
+
+function effectiveAggregationPreset(): { multiplier: number; timespan: "minute" | "hour" | "day" } {
+  if (isCandleIntervalRelevant()) {
+    const selected = CANDLE_INTERVAL_OPTIONS.find((item) => item.key === selectedCandleIntervalKey)
+      ?? CANDLE_INTERVAL_OPTIONS[2];
+    return {
+      multiplier: selected.multiplier,
+      timespan: selected.timespan,
+    };
+  }
+
+  return {
+    multiplier: selectedRange.multiplier,
+    timespan: selectedRange.timespan,
+  };
 }
 
 function formatAxisTime(time: Time, _tickType: TickMarkType): string | null {
@@ -635,7 +932,14 @@ function isAfterHoursBar(bar: AggregateBar): boolean {
   return totalMinutes > marketClose;
 }
 
-function getExtendedStripFromBars(): { closePrice: number; closeChangePct: number; afterPrice: number; afterChangePct: number } | null {
+function isPreMarketBar(bar: AggregateBar): boolean {
+  const ny = getNyParts(bar.t);
+  const totalMinutes = ny.hour * 60 + ny.minute;
+  const marketOpen = 9 * 60 + 30;
+  return totalMinutes < marketOpen;
+}
+
+function getExtendedStripFromBars(): { closePrice: number; closeChangePct: number; afterPrice: number; afterChangePct: number; isPreMarket: boolean } | null {
   if (selectedRange.label !== "1D" || latestBars.length === 0) {
     return null;
   }
@@ -648,7 +952,31 @@ function getExtendedStripFromBars(): { closePrice: number; closeChangePct: numbe
 
   const regularBars = sessionBars.filter(isRegularMarketHour);
   const afterHoursBars = sessionBars.filter(isAfterHoursBar);
-  if (regularBars.length === 0 || afterHoursBars.length === 0) {
+
+  // Pre-market: no regular session has started yet
+  if (regularBars.length === 0) {
+    const preMarketBars = sessionBars.filter(isPreMarketBar);
+    if (preMarketBars.length > 0) {
+      const snapshot = latestSnapshotsByTicker.get(selectedTicker);
+      const closePrice = snapshot?.price;
+      const closeChangePct = snapshot?.change_percent;
+      const afterBar = preMarketBars[preMarketBars.length - 1];
+      if (!Number.isFinite(closePrice) || !Number.isFinite(closeChangePct) || !closePrice || !Number.isFinite(afterBar.c) || afterBar.c === 0) {
+        return null;
+      }
+      return {
+        closePrice: closePrice as number,
+        closeChangePct: closeChangePct as number,
+        afterPrice: afterBar.c,
+        afterChangePct: ((afterBar.c - (closePrice as number)) / (closePrice as number)) * 100,
+        isPreMarket: true,
+      };
+    }
+    return null;
+  }
+
+  // Regular session in progress: no extended strip
+  if (afterHoursBars.length === 0) {
     return null;
   }
 
@@ -669,6 +997,7 @@ function getExtendedStripFromBars(): { closePrice: number; closeChangePct: numbe
     closeChangePct,
     afterPrice: afterBar.c,
     afterChangePct,
+    isPreMarket: false,
   };
 }
 
@@ -686,6 +1015,16 @@ function selectOneDaySession(bars: AggregateBar[]): { bars: AggregateBar[]; sess
   }
 
   const dates = Array.from(grouped.keys()).sort();
+
+  // If the newest date only has extended-hours bars (typical premarket),
+  // prefer it so we show today's live premarket instead of yesterday's session.
+  const latestDate = dates[dates.length - 1];
+  const latestSessionBars = grouped.get(latestDate) ?? [];
+  const latestRegularCount = latestSessionBars.filter(isRegularMarketHour).length;
+  if (latestSessionBars.length > 0 && latestRegularCount === 0) {
+    return { bars: latestSessionBars, sessionDate: latestDate };
+  }
+
   for (let i = dates.length - 1; i >= 0; i -= 1) {
     const date = dates[i];
     const sessionBars = grouped.get(date) ?? [];
@@ -696,7 +1035,6 @@ function selectOneDaySession(bars: AggregateBar[]): { bars: AggregateBar[]; sess
     }
   }
 
-  const latestDate = dates[dates.length - 1];
   return { bars: grouped.get(latestDate) ?? [], sessionDate: latestDate };
 }
 
@@ -789,8 +1127,8 @@ function renderSessionShading(chart: IChartApi, container: HTMLDivElement): void
 async function fetchBars(
   from: string,
   to: string,
-  multiplier: number = selectedRange.multiplier,
-  timespan: RangePreset["timespan"] = selectedRange.timespan,
+  multiplier: number = effectiveAggregationPreset().multiplier,
+  timespan: RangePreset["timespan"] = effectiveAggregationPreset().timespan,
 ): Promise<AggregateBar[]> {
   try {
     return await invoke<AggregateBar[]>("fetch_polygon_aggregates", {
@@ -846,11 +1184,12 @@ async function loadBars(): Promise<void> {
     }
 
     const { from, to } = getBarDateRange();
+    const effective = effectiveAggregationPreset();
     debugLog("loadBars:start", {
       ticker: selectedTicker,
       range: selectedRange.label,
-      multiplier: selectedRange.multiplier,
-      timespan: selectedRange.timespan,
+      multiplier: effective.multiplier,
+      timespan: effective.timespan,
       from,
       to,
     });
@@ -878,7 +1217,7 @@ async function loadBars(): Promise<void> {
       }
     }
 
-    if (bars.length === 0 && selectedRange.timespan !== "day") {
+    if (bars.length === 0 && effective.timespan !== "day") {
       try {
         bars = await fetchBars(toNyIsoDate(Math.max(selectedRange.days, 60)), toNyIsoDate(0), 1, "day");
       } catch (error) {
@@ -912,12 +1251,20 @@ async function loadBars(): Promise<void> {
       const afterHoursBars = bars.filter(isAfterHoursBar);
       const afterHoursCount = afterHoursBars.length;
       const afterHoursNonZeroVolume = afterHoursBars.filter((bar) => bar.v > 0).length;
+      const afterHoursVolumeSample = afterHoursBars.slice(-12).map((bar) => ({
+        et: formatEt(bar.t),
+        close: bar.c,
+        volume: bar.v,
+      }));
+      const afterHoursVolumeMax = afterHoursBars.reduce((max, bar) => Math.max(max, bar.v), 0);
       debugLog("loadBars:1d-session", {
         sessionDate: activeSessionDate,
         count: bars.length,
         regularCount,
         afterHoursCount,
         afterHoursNonZeroVolume,
+        afterHoursVolumeMax,
+        afterHoursVolumeSample,
         firstEt: bars[0] ? formatEt(bars[0].t) : null,
         lastEt: bars[bars.length - 1] ? formatEt(bars[bars.length - 1].t) : null,
       });
@@ -1046,10 +1393,18 @@ function renderCharts(): void {
   }
 
   const nextViewKey = currentChartViewKey();
+  const previousViewKey = persistedVisibleRangeKey;
   const previousVisibleRange = priceChart?.timeScale().getVisibleLogicalRange() ?? null;
-  if (previousVisibleRange && persistedVisibleRangeKey === nextViewKey) {
-    persistedVisibleRange = previousVisibleRange;
+  if (previousVisibleRange && previousViewKey) {
+    upsertVisibleRangeForViewKey(previousViewKey, {
+      from: previousVisibleRange.from,
+      to: previousVisibleRange.to,
+    });
+    persistPrefs();
   }
+
+  persistedVisibleRangeKey = nextViewKey;
+  persistedVisibleRange = normalizeVisibleRangesByViewKey(prefs.visibleRangesByViewKey)[nextViewKey] ?? null;
 
   disposeCharts();
 
@@ -1167,6 +1522,7 @@ function renderCharts(): void {
     priceChart.timeScale().fitContent();
     volumeChart.timeScale().fitContent();
     persistedVisibleRange = priceChart.timeScale().getVisibleLogicalRange() ?? null;
+    schedulePersistVisibleRangeForCurrentView(persistedVisibleRange);
   }
   persistedVisibleRangeKey = nextViewKey;
 
@@ -1208,6 +1564,7 @@ function renderCharts(): void {
   priceChart.timeScale().subscribeVisibleLogicalRangeChange(() => {
     if (priceChart && persistedVisibleRangeKey === currentChartViewKey()) {
       persistedVisibleRange = priceChart.timeScale().getVisibleLogicalRange() ?? null;
+      schedulePersistVisibleRangeForCurrentView(persistedVisibleRange);
     }
     if (priceChart && volumeChart) {
       syncVisibleRange(priceChart, volumeChart);
@@ -1227,49 +1584,86 @@ function renderCharts(): void {
 }
 
 function updateHeadline(): void {
-  if (latestBars.length < 2) {
-    return;
-  }
-
-  const first = latestBars[0].o;
-  const last = latestBars[latestBars.length - 1].c;
-  const delta = last - first;
-  const pct = (delta / first) * 100;
-
-  titleTickerEl.textContent = selectedTicker;
-  headlinePriceEl.textContent = fmtNumber(last);
-  headlineChangeEl.textContent = `${delta >= 0 ? "+" : ""}${fmtNumber(delta)} (${fmtPct(pct)})`;
-  headlineChangeEl.className = `subtle ${delta >= 0 ? "up" : "down"}`;
-
   const snapshot = latestSnapshotsByTicker.get(selectedTicker);
-  const snapshotHasExtended = Number.isFinite(snapshot?.post_market_price)
+  const hasPostMarket = Number.isFinite(snapshot?.post_market_price)
     && Number.isFinite(snapshot?.post_market_change_percent)
     && Number.isFinite(snapshot?.price)
     && Number.isFinite(snapshot?.change_percent);
+  const hasPreMarket = !hasPostMarket
+    && Number.isFinite(snapshot?.pre_market_price)
+    && Number.isFinite(snapshot?.pre_market_change_percent)
+    && Number.isFinite(snapshot?.price)
+    && Number.isFinite(snapshot?.change_percent);
+  const snapshotHasExtended = hasPostMarket || hasPreMarket;
+
+  const barStrip = snapshotHasExtended ? null : getExtendedStripFromBars();
 
   const stripData = snapshotHasExtended
     ? {
       closePrice: snapshot?.price as number,
       closeChangePct: snapshot?.change_percent as number,
-      afterPrice: snapshot?.post_market_price as number,
-      afterChangePct: snapshot?.post_market_change_percent as number,
+      afterPrice: hasPostMarket ? (snapshot?.post_market_price as number) : (snapshot?.pre_market_price as number),
+      afterChangePct: hasPostMarket ? (snapshot?.post_market_change_percent as number) : (snapshot?.pre_market_change_percent as number),
+      isPreMarket: hasPreMarket,
     }
-    : getExtendedStripFromBars();
+    : barStrip;
 
-  if (!stripData) {
-    extendedStripEl.classList.add("hidden");
+  titleTickerEl.textContent = selectedTicker;
+
+  if (stripData) {
+    // Extended hours: show only the strip
+    headlinePriceEl.classList.add("hidden");
+    headlineChangeEl.classList.add("hidden");
+    extendedStripEl.classList.remove("hidden");
+
+    closePriceEl.textContent = fmtNumber(stripData.closePrice);
+    closeChangeEl.textContent = fmtPct(stripData.closeChangePct);
+    closeChangeEl.className = `extended-change subtle ${stripData.closeChangePct >= 0 ? "up" : "down"}`;
+
+    afterPriceEl.textContent = fmtNumber(stripData.afterPrice);
+    afterChangeEl.textContent = fmtPct(stripData.afterChangePct);
+    afterChangeEl.className = `extended-change subtle ${stripData.afterChangePct >= 0 ? "up" : "down"}`;
+    afterLabelEl.textContent = stripData.isPreMarket ? "Pre-Market" : "After Hours";
     return;
   }
 
-  extendedStripEl.classList.remove("hidden");
+  // Regular market hours: compute price from snapshot or bars fallback
+  const snapshotDisplayPrice = snapshot?.price;
+  const snapshotDisplayPct = snapshot?.change_percent;
 
-  closePriceEl.textContent = fmtNumber(stripData.closePrice);
-  closeChangeEl.textContent = fmtPct(stripData.closeChangePct);
-  closeChangeEl.className = `extended-change subtle ${stripData.closeChangePct >= 0 ? "up" : "down"}`;
+  let displayPrice = Number.isFinite(snapshotDisplayPrice) ? (snapshotDisplayPrice as number) : NaN;
+  let displayPct = Number.isFinite(snapshotDisplayPct) ? (snapshotDisplayPct as number) : NaN;
+  let displayDelta = NaN;
 
-  afterPriceEl.textContent = fmtNumber(stripData.afterPrice);
-  afterChangeEl.textContent = fmtPct(stripData.afterChangePct);
-  afterChangeEl.className = `extended-change subtle ${stripData.afterChangePct >= 0 ? "up" : "down"}`;
+  if (Number.isFinite(displayPrice) && Number.isFinite(displayPct)) {
+    const denom = 100 + displayPct;
+    if (Math.abs(denom) > Number.EPSILON) {
+      const previousClose = (displayPrice * 100) / denom;
+      displayDelta = displayPrice - previousClose;
+    }
+  }
+
+  if ((!Number.isFinite(displayPrice) || !Number.isFinite(displayPct) || !Number.isFinite(displayDelta)) && latestBars.length >= 2) {
+    const first = latestBars[0].o;
+    const last = latestBars[latestBars.length - 1].c;
+    const delta = last - first;
+    const pct = (delta / first) * 100;
+
+    displayPrice = last;
+    displayPct = pct;
+    displayDelta = delta;
+  }
+
+  if (!Number.isFinite(displayPrice) || !Number.isFinite(displayPct) || !Number.isFinite(displayDelta)) {
+    return;
+  }
+
+  headlinePriceEl.classList.remove("hidden");
+  headlinePriceEl.textContent = fmtNumber(displayPrice);
+  headlineChangeEl.classList.remove("hidden");
+  headlineChangeEl.textContent = `${displayDelta >= 0 ? "+" : ""}${fmtNumber(displayDelta)} (${fmtPct(displayPct)})`;
+  headlineChangeEl.className = `subtle ${displayDelta >= 0 ? "up" : "down"}`;
+  extendedStripEl.classList.add("hidden");
 }
 
 function renderControls(): void {
@@ -1277,6 +1671,17 @@ function renderControls(): void {
     const active = item.label === selectedRange.label ? "active" : "";
     return `<button class="pill ${active}" data-range="${item.label}">${item.label}</button>`;
   }).join("");
+
+  if (isCandleIntervalRelevant()) {
+    intervalGroupEl.classList.remove("hidden");
+    intervalGroupEl.innerHTML = CANDLE_INTERVAL_OPTIONS.map((item) => {
+      const active = item.key === selectedCandleIntervalKey ? "active" : "";
+      return `<button class="pill ${active}" data-candle-interval="${item.key}">${item.label}</button>`;
+    }).join("");
+  } else {
+    intervalGroupEl.classList.add("hidden");
+    intervalGroupEl.innerHTML = "";
+  }
 
   typeGroupEl.innerHTML = chartTypes.map((type) => {
     const active = type === selectedChartType ? "active" : "";
@@ -1290,13 +1695,14 @@ function selectedChannel(): "A" | "AM" {
 }
 
 function aggregateWindowMs(): number {
-  if (selectedRange.timespan === "minute") {
-    return selectedRange.multiplier * 60_000;
+  const effective = effectiveAggregationPreset();
+  if (effective.timespan === "minute") {
+    return effective.multiplier * 60_000;
   }
-  if (selectedRange.timespan === "hour") {
-    return selectedRange.multiplier * 60 * 60_000;
+  if (effective.timespan === "hour") {
+    return effective.multiplier * 60 * 60_000;
   }
-  return selectedRange.multiplier * 24 * 60 * 60_000;
+  return effective.multiplier * 24 * 60 * 60_000;
 }
 
 function applyLiveAggregate(event: LiveAggregateEvent): void {
@@ -1329,7 +1735,8 @@ function applyLiveAggregate(event: LiveAggregateEvent): void {
     targetIndex = latestBars.findIndex((bar) => bar.t === bucketStart);
   } else {
     const existing = latestBars[targetIndex];
-    const shouldReplaceCurrentBar = selectedRange.timespan === "minute" && selectedRange.multiplier === 1;
+    const effective = effectiveAggregationPreset();
+    const shouldReplaceCurrentBar = effective.timespan === "minute" && effective.multiplier === 1;
 
     latestBars[targetIndex] = {
       t: existing.t,
@@ -1388,6 +1795,7 @@ async function attachAggregateListener(): Promise<void> {
 
 function setupSplitters(): void {
   const shell = document.querySelector(".app-shell") as HTMLDivElement;
+  const mainPanel = document.querySelector(".main-panel") as HTMLDivElement;
   const chartStack = document.querySelector("#chart-stack") as HTMLDivElement;
   const sidebarSplitter = document.querySelector("#sidebar-splitter") as HTMLDivElement;
   const volumeSplitter = document.querySelector("#volume-splitter") as HTMLDivElement;
@@ -1419,8 +1827,9 @@ function setupSplitters(): void {
     drag((_x, y) => {
       const rect = chartStack.getBoundingClientRect();
       const priceHeight = Math.max(220, Math.min(rect.height - 120, y - rect.top));
-      chartStack.style.setProperty("--price-pane-height", `${priceHeight}px`);
-      prefs.pricePaneHeight = priceHeight;
+      const ratio = clamp(MIN_PRICE_PANE_RATIO, MAX_PRICE_PANE_RATIO, priceHeight / Math.max(1, rect.height));
+      chartStack.style.setProperty("--price-pane-height", `${(ratio * 100).toFixed(3)}%`);
+      prefs.pricePaneHeight = ratio;
       persistPrefs();
     }),
   );
@@ -1428,13 +1837,187 @@ function setupSplitters(): void {
   newsSplitter.addEventListener(
     "pointerdown",
     drag((_x, y) => {
-      const appRect = shell.getBoundingClientRect();
-      const chartHeight = Math.max(320, Math.min(appRect.height - 220, y - appRect.top - 86));
-      shell.style.setProperty("--chart-area-height", `${chartHeight}px`);
-      prefs.chartAreaHeight = chartHeight;
+      const panelRect = mainPanel.getBoundingClientRect();
+      const chartHeight = Math.max(320, Math.min(panelRect.height - 220, y - panelRect.top - 86));
+      const ratio = clamp(MIN_CHART_AREA_RATIO, MAX_CHART_AREA_RATIO, chartHeight / Math.max(1, panelRect.height));
+      shell.style.setProperty("--chart-area-height", `${(ratio * 100).toFixed(3)}%`);
+      prefs.chartAreaHeight = ratio;
       persistPrefs();
     }),
   );
+}
+
+function reorderWatchlistSymbols(
+  draggedTicker: string,
+  targetTicker: string,
+  placeAfter: boolean,
+): boolean {
+  if (draggedTicker === targetTicker) {
+    return false;
+  }
+
+  const fromIndex = watchlistSymbols.indexOf(draggedTicker);
+  const toIndex = watchlistSymbols.indexOf(targetTicker);
+
+  if (fromIndex < 0 || toIndex < 0) {
+    return false;
+  }
+
+  const next = [...watchlistSymbols];
+  const [moved] = next.splice(fromIndex, 1);
+
+  let insertIndex = placeAfter ? toIndex + 1 : toIndex;
+  if (fromIndex < insertIndex) {
+    insertIndex -= 1;
+  }
+
+  next.splice(insertIndex, 0, moved);
+  watchlistSymbols = next;
+  persistWatchlistSymbols();
+  return true;
+}
+
+function clearDragStyling(): void {
+  watchlistListEl.querySelectorAll(".watch-row-wrap").forEach((row) => {
+    row.classList.remove("dragging", "drag-over-top", "drag-over-bottom");
+  });
+}
+
+function getDropTargetInfo(clientY: number): { targetTicker: string; placeAfter: boolean } | null {
+  const rows = Array.from(
+    watchlistListEl.querySelectorAll("[data-order-ticker]"),
+  ) as HTMLDivElement[];
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const activeRows = rows.filter((row) => row.dataset.orderTicker !== draggingTicker);
+  if (activeRows.length === 0) {
+    return null;
+  }
+
+  for (const row of activeRows) {
+    const rect = row.getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) {
+      const ticker = row.dataset.orderTicker;
+      return ticker ? { targetTicker: ticker, placeAfter: false } : null;
+    }
+  }
+
+  const lastRow = activeRows[activeRows.length - 1];
+  const lastTicker = lastRow.dataset.orderTicker;
+  return lastTicker ? { targetTicker: lastTicker, placeAfter: true } : null;
+}
+
+function renderDropIndicator(dropInfo: { targetTicker: string; placeAfter: boolean } | null): void {
+  clearDragStyling();
+
+  if (!draggingTicker || !dropInfo) {
+    return;
+  }
+
+  const draggingRow = watchlistListEl.querySelector(
+    `[data-order-ticker="${draggingTicker}"]`,
+  ) as HTMLDivElement | null;
+  draggingRow?.classList.add("dragging");
+
+  const targetRow = watchlistListEl.querySelector(
+    `[data-order-ticker="${dropInfo.targetTicker}"]`,
+  ) as HTMLDivElement | null;
+  if (!targetRow || dropInfo.targetTicker === draggingTicker) {
+    return;
+  }
+
+  targetRow.classList.add(dropInfo.placeAfter ? "drag-over-bottom" : "drag-over-top");
+}
+
+function setupWatchlistDragAndDrop(): void {
+  const cleanupPointerDrag = () => {
+    draggingTicker = null;
+    draggingPointerId = null;
+    draggingStarted = false;
+    pendingDropInfo = null;
+    clearDragStyling();
+  };
+
+  watchlistListEl.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-remove-ticker]")) {
+      return;
+    }
+
+    const row = target.closest("[data-order-ticker]") as HTMLDivElement | null;
+    if (!row) {
+      return;
+    }
+
+    draggingTicker = row.dataset.orderTicker ?? null;
+    if (!draggingTicker) {
+      return;
+    }
+
+    draggingPointerId = event.pointerId;
+    draggingStartY = event.clientY;
+    draggingStarted = false;
+    pendingDropInfo = null;
+
+    try {
+      row.setPointerCapture(event.pointerId);
+    } catch {
+      // Ignore environments that do not support pointer capture on this element.
+    }
+  });
+
+  watchlistListEl.addEventListener("pointermove", (event) => {
+    if (!draggingTicker || draggingPointerId !== event.pointerId) {
+      return;
+    }
+
+    const movement = Math.abs(event.clientY - draggingStartY);
+    if (!draggingStarted && movement < 4) {
+      return;
+    }
+
+    draggingStarted = true;
+    const dropInfo = getDropTargetInfo(event.clientY);
+    pendingDropInfo = dropInfo;
+    renderDropIndicator(dropInfo);
+    event.preventDefault();
+  });
+
+  watchlistListEl.addEventListener("pointerup", (event) => {
+    if (!draggingTicker || draggingPointerId !== event.pointerId) {
+      return;
+    }
+
+    if (draggingStarted && pendingDropInfo) {
+      if (reorderWatchlistSymbols(draggingTicker, pendingDropInfo.targetTicker, pendingDropInfo.placeAfter)) {
+        renderWatchlistRows(latestSnapshotsByTicker);
+      }
+      suppressWatchlistClick = true;
+    } else if (!draggingStarted) {
+      suppressWatchlistClick = true;
+      void selectTickerAndRefresh(draggingTicker);
+    }
+
+    cleanupPointerDrag();
+  });
+
+  watchlistListEl.addEventListener("pointercancel", (event) => {
+    if (draggingPointerId !== event.pointerId) {
+      return;
+    }
+    cleanupPointerDrag();
+  });
+
+  watchlistListEl.addEventListener("lostpointercapture", () => {
+    cleanupPointerDrag();
+  });
 }
 
 async function refreshAll(): Promise<void> {
@@ -1447,7 +2030,20 @@ async function refreshAll(): Promise<void> {
   await startStream();
 }
 
+async function selectTickerAndRefresh(ticker: string): Promise<void> {
+  selectedTicker = ticker;
+  prefs.ticker = selectedTicker;
+  persistPrefs();
+  await refreshAll();
+}
+
 watchlistEl.addEventListener("click", async (event) => {
+  if (suppressWatchlistClick) {
+    suppressWatchlistClick = false;
+    event.preventDefault();
+    return;
+  }
+
   const removeButton = (event.target as HTMLElement).closest("[data-remove-ticker]") as HTMLButtonElement | null;
   if (removeButton) {
     const tickerToRemove = removeButton.dataset.removeTicker;
@@ -1474,10 +2070,13 @@ watchlistEl.addEventListener("click", async (event) => {
   if (!button) {
     return;
   }
-  selectedTicker = button.dataset.ticker ?? selectedTicker;
-  prefs.ticker = selectedTicker;
-  persistPrefs();
-  await refreshAll();
+
+  const ticker = button.dataset.ticker;
+  if (!ticker) {
+    return;
+  }
+
+  await selectTickerAndRefresh(ticker);
 });
 
 watchlistAddFormEl.addEventListener("submit", async (event) => {
@@ -1495,10 +2094,7 @@ watchlistAddFormEl.addEventListener("submit", async (event) => {
     persistWatchlistSymbols();
   }
 
-  selectedTicker = symbol;
-  prefs.ticker = selectedTicker;
-  persistPrefs();
-  await refreshAll();
+  await selectTickerAndRefresh(symbol);
 });
 
 rangeGroupEl.addEventListener("click", async (event) => {
@@ -1518,26 +2114,67 @@ rangeGroupEl.addEventListener("click", async (event) => {
   await startStream();
 });
 
+intervalGroupEl.addEventListener("click", async (event) => {
+  const button = (event.target as HTMLElement).closest("[data-candle-interval]") as HTMLButtonElement | null;
+  if (!button) {
+    return;
+  }
+
+  const nextKey = button.dataset.candleInterval;
+  if (!nextKey || !CANDLE_INTERVAL_OPTIONS.some((item) => item.key === nextKey)) {
+    return;
+  }
+
+  selectedCandleIntervalKey = nextKey;
+  prefs.candleIntervalKey = nextKey;
+  persistPrefs();
+  renderControls();
+  await loadBars();
+  await startStream();
+});
+
 typeGroupEl.addEventListener("click", async (event) => {
   const button = (event.target as HTMLElement).closest("[data-type]") as HTMLButtonElement | null;
   if (!button) {
     return;
   }
+  const wasRelevant = isCandleIntervalRelevant();
   selectedChartType = (button.dataset.type as ChartType) ?? selectedChartType;
   prefs.chartType = selectedChartType;
   persistPrefs();
+  const isRelevant = isCandleIntervalRelevant();
   renderControls();
+
+  if (!wasRelevant && isRelevant) {
+    await loadBars();
+    await startStream();
+    return;
+  }
+
   renderCharts();
 });
 
 async function bootstrap(): Promise<void> {
   startRefreshProgressLoop();
   await initStore();
-  await restoreWindowLayout();
-  await initWindowLayoutPersistence();
   ensureSelectedTicker();
+  renderWatchlistRows();
+
+  try {
+    await restoreWindowLayout();
+  } catch (error) {
+    debugLog("window:restore-exception", String(error));
+  }
+
+  try {
+    await initWindowLayoutPersistence();
+  } catch (error) {
+    debugLog("window:persistence-init-failed", String(error));
+  }
+
   renderControls();
   setupSplitters();
+  setupWatchlistDragAndDrop();
   await attachAggregateListener();
   await refreshAll();
 
@@ -1564,9 +2201,19 @@ async function bootstrap(): Promise<void> {
 }
 
 window.addEventListener("beforeunload", () => {
+  if (visibleRangeSaveTimer !== null) {
+    window.clearTimeout(visibleRangeSaveTimer);
+    visibleRangeSaveTimer = null;
+  }
+  persistVisibleRangeForCurrentView(priceChart?.timeScale().getVisibleLogicalRange() ?? persistedVisibleRange);
+
   if (windowLayoutSaveTimer !== null) {
     window.clearTimeout(windowLayoutSaveTimer);
     windowLayoutSaveTimer = null;
+  }
+  if (windowLayoutPeriodicTimer !== null) {
+    window.clearInterval(windowLayoutPeriodicTimer);
+    windowLayoutPeriodicTimer = null;
   }
   void captureWindowLayout();
 
@@ -1577,6 +2224,10 @@ window.addEventListener("beforeunload", () => {
   if (unlistenWindowResized) {
     unlistenWindowResized();
     unlistenWindowResized = null;
+  }
+  if (unlistenDomResize) {
+    unlistenDomResize();
+    unlistenDomResize = null;
   }
 
   if (refreshProgressRaf !== null) {
