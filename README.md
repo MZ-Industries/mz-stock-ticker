@@ -1,101 +1,175 @@
+<div align="center">
+
+<img src="src-tauri/icons/128x128@2x.png" alt="MZ Stock Ticker icon" width="140" />
+
 # MZ Stock Ticker
 
-Desktop stock dashboard built with Tauri + Rust + TypeScript, styled after Apple Stocks and powered by Yahoo Finance endpoints.
+**A fast, native stock dashboard for your desktop — styled after Apple Stocks.**
+
+Live watchlist, candlestick charts, key statistics, and market news in a
+lightweight app built with Tauri, Rust, and TypeScript.
+
+[![Latest release](https://img.shields.io/github/v/release/MZ-Industries/mz-stock-ticker?style=flat-square)](https://github.com/MZ-Industries/mz-stock-ticker/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/MZ-Industries/mz-stock-ticker/total?style=flat-square)](https://github.com/MZ-Industries/mz-stock-ticker/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/MZ-Industries/mz-stock-ticker/ci.yml?style=flat-square&label=CI)](https://github.com/MZ-Industries/mz-stock-ticker/actions/workflows/ci.yml)
+[![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
+[![Platforms](https://img.shields.io/badge/platform-macOS%20·%20Windows%20·%20Linux-4c72b0?style=flat-square)](https://github.com/MZ-Industries/mz-stock-ticker/releases/latest)
+
+[Features](#features) • [Download](#download) • [Tips](#tips) • [Configuration](#configuration) • [Development](#development) • [Data notes](#data-notes)
+
+<a href="https://github.com/MZ-Industries/mz-stock-ticker/releases/latest">
+  <img src="docs/screenshot-main.png" alt="MZ Stock Ticker showing a candlestick chart with moving averages, a live watchlist with sparklines, key statistics, and business news" width="92%" />
+</a>
+
+</div>
+
+No account. No API key. Add your symbols and go.
 
 ## Features
 
-- Apple-style watchlist + detail layout
-- Symbol search with company-name autocomplete (exchange and type shown per result)
-- Multiple chart modes (line, area, baseline, candlestick, bar)
-- Crosshair OHLC/volume legend on the price chart
-- Previous-close reference line on the 1D chart
-- 1D holds several sessions: it opens on the latest one (pre-market included) and
-  scrolling left reveals prior days, with non-regular hours shaded per session
-- Infinite scroll-back: nearing the oldest loaded bar fetches older history in
-  chunks, on every range (bounded by Yahoo's intraday retention: 1m ~30 days,
-  5m-30m ~60 days, hourly ~2 years, daily unlimited)
-- Key statistics strip (open, day range, prev close, volume, avg volume, 52-week range, market cap, P/E, EPS, dividend yield)
-- Dedicated volume chart below price chart
-- Moving average overlays (20 / 50 / 200)
-- Range presets: 1D, 1W, 1M, 3M, 6M, YTD, 1Y, 5Y, ALL
-- Resizable panes (sidebar width, price/volume split, chart/news split)
-- Add/remove/reorder symbols directly in the watchlist; arrow keys move the selection
-- Watchlist change badge toggles between % and $ change on click
-- News cards with thumbnails and relative timestamps; opens stories in the default browser
-- Yahoo-backed data calls from Rust commands (aggregates, quotes, sparklines, news, search, symbol detail)
-- Cookie + crumb authentication for Yahoo's quote endpoint (required since 2023), with automatic refresh on 401
-- Live trailing candle via a backend poller that republishes Yahoo's 1-minute bars
-- Optional volume backfill from a Massive/Polygon-compatible aggregates API
-- Persisted dashboard preferences via Tauri Store (ticker/range/chart type/pane sizes/visible range)
-- Window position/size persisted natively via tauri-plugin-window-state
+**Charts**
 
-## Prerequisites
+- Five chart modes — candlestick, line, area, baseline, and bar — with a crosshair OHLC/volume legend
+- Moving-average overlays (20 / 50 / 200) and a dedicated volume pane
+- Range presets from 1D to ALL, with infinite scroll-back that fetches older history as you approach it
+- The 1D view holds several sessions: it opens on the latest one (pre-market included), scrolling left reveals prior days, and non-regular hours are shaded per session
+- Previous-close reference line and a live trailing candle driven by a background poller
 
-- Node.js 20+
-- Rust toolchain
-- Tauri prerequisites for macOS
-- No API key required
+**Watchlist**
 
-## Environment variables
+- Apple Stocks–style sidebar with sparklines; add, remove, and reorder symbols in place
+- Symbol search with company-name autocomplete, showing exchange and type per result
+- Change badges toggle between % and $ on click
 
-The app auto-loads a root `.env` file on startup. All are optional:
+**Statistics & news**
 
-- `YAHOO_BASE_URL` (default: `https://query1.finance.yahoo.com`)
-- `YAHOO_NEWS_BASE_URL` (default: `https://query2.finance.yahoo.com`)
-- `MASSIVE_API_KEY` / `POLYGON_API_KEY` — enables the volume overlay that fills in
-  candles Yahoo reports with zero volume (mostly pre/post market)
-- `MASSIVE_BASE_URL` / `POLYGON_BASE_URL` (default: `https://api.massive.com`)
-- `LIVE_POLL_MS` — override the live poll interval (minimum 1000). Defaults to 15s
-  during extended trading hours and 120s outside them.
-- `MASSIVE_DEBUG=true` to enable backend debug logs (off by default)
+- Key statistics strip: open, day range, previous close, volume, average volume, 52-week range, market cap, P/E, EPS, and dividend yield
+- News cards with thumbnails and relative timestamps — stories open in your default browser
+- Status bar with data provider, live poll cadence, lag, and market session
 
-## Backend commands
+**Quality of life**
 
-- `get_provider_status`
-- `fetch_aggregates`
-- `fetch_snapshots`
-- `fetch_sparklines`
-- `fetch_news`
-- `fetch_symbol_detail`
-- `search_symbols`
-- `start_live_stream` / `stop_live_stream`
+- Resizable panes: sidebar width, price/volume split, and chart/news split
+- Everything persists between launches — ticker, range, chart type, pane sizes, visible range, and window position
 
-The live stream emits a `live-bars` event carrying the freshly polled candle tail.
+## Download
 
-## Run
+Grab the latest build for your platform from the
+[**Releases page**](https://github.com/MZ-Industries/mz-stock-ticker/releases/latest).
+
+| Platform              | File to download                                     |
+| --------------------- | ---------------------------------------------------- |
+| macOS (Apple Silicon) | `MZ.Stock.Ticker_x.y.z_aarch64.dmg`                  |
+| macOS (Intel)         | `MZ.Stock.Ticker_x.y.z_x64.dmg`                      |
+| Windows               | `MZ.Stock.Ticker_x.y.z_x64-setup.exe` (or the `.msi`) |
+| Linux                 | `.AppImage` (most portable), `.deb`, or `.rpm`       |
+
+> [!IMPORTANT]
+> **macOS:** builds are not code-signed, so Gatekeeper will report the app as
+> "damaged" or from an unidentified developer on first launch. After copying it
+> to Applications, clear the quarantine flag:
+>
+> ```bash
+> xattr -r -d com.apple.quarantine "/Applications/MZ Stock Ticker.app"
+> ```
+
+> [!NOTE]
+> **Linux:** the AppImage needs to be made executable first —
+> `chmod +x MZ.Stock.Ticker_*.AppImage`.
+
+## Tips
+
+| Action                              | How                                        |
+| ----------------------------------- | ------------------------------------------ |
+| Switch between watchlist symbols    | <kbd>↑</kbd> / <kbd>↓</kbd>                |
+| Toggle % / $ change in the sidebar  | Click any change badge                     |
+| Show OHLC + volume for a candle     | Hover the price chart                      |
+| Load older history                  | Scroll left — more is fetched automatically |
+| Resize sidebar / chart / news panes | Drag the dividers                          |
+
+## Configuration
+
+The app works out of the box with no configuration. Power users can tweak it
+through environment variables (in development, a `.env` file in the project
+root is loaded automatically — see [`.env.example`](.env.example)). All are
+optional:
+
+| Variable                                | Default                            | Purpose                                                                                        |
+| --------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `YAHOO_BASE_URL`                        | `https://query1.finance.yahoo.com` | Override the market-data endpoint                                                              |
+| `YAHOO_NEWS_BASE_URL`                   | `https://query2.finance.yahoo.com` | Override the news endpoint                                                                     |
+| `MASSIVE_API_KEY` / `POLYGON_API_KEY`   | —                                  | Enables volume backfill for candles Yahoo reports with zero volume (mostly pre/post market)    |
+| `MASSIVE_BASE_URL` / `POLYGON_BASE_URL` | `https://api.massive.com`          | Aggregates API used for the volume backfill                                                    |
+| `LIVE_POLL_MS`                          | 15s in extended hours, else 120s   | Live poll interval override (minimum 1000)                                                     |
+| `MASSIVE_DEBUG`                         | off                                | `true` enables backend debug logs                                                              |
+
+## Development
+
+Prerequisites: [Node.js 20+](https://nodejs.org), a
+[Rust toolchain](https://rustup.rs), and the
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
 
 ```bash
+git clone https://github.com/MZ-Industries/mz-stock-ticker.git
+cd mz-stock-ticker
 npm install
 npm run tauri dev
 ```
 
-Quick setup:
+Run the checks CI runs:
 
 ```bash
-cp .env.example .env
-npm run tauri dev
+npm test                              # frontend unit tests (vitest)
+npm run build                         # typecheck + bundle
+cd src-tauri && cargo test            # backend tests
 ```
 
-## Notes
+<details>
+<summary><strong>Architecture notes</strong></summary>
 
-- Yahoo endpoints are unofficial and can change without notice.
-- Yahoo's `/v7/finance/quote` endpoint requires a session cookie plus a "crumb"
-  token; the backend acquires and caches both automatically and falls back to
-  per-symbol chart metadata if the quote endpoint is unavailable.
-- Yahoo rate-limits aggressively per IP (multi-hour bans have been observed) and
-  since early 2025 also blocks some non-browser TLS fingerprints outright. If the
-  app sits in a 429 cooldown loop for a long time, the IP is likely temporarily
-  banned — lower the request rate or wait it out. A browser-impersonating HTTP
-  stack (e.g. the `rquest` crate) or a first-party data API is the durable fix.
-- Intraday data quality/latency may vary by symbol and session.
-- Chart scrolling follows real time only while the newest candle is already on
-  screen — that is lightweight-charts' `shiftVisibleRangeOnNewBar`, deliberately
-  left to the library. Scroll back into history and the view stays put.
+The TypeScript frontend (Vite + [lightweight-charts](https://github.com/tradingview/lightweight-charts))
+talks to a Rust backend over Tauri commands: `get_provider_status`,
+`fetch_aggregates`, `fetch_snapshots`, `fetch_sparklines`, `fetch_news`,
+`fetch_symbol_detail`, `search_symbols`, and `start_live_stream` /
+`stop_live_stream`. The live stream republishes Yahoo's 1-minute bars as
+`live-bars` events carrying the freshly polled candle tail. Dashboard
+preferences persist via the Tauri Store plugin; window geometry via
+tauri-plugin-window-state.
 
-## Build checks
+Chart scrolling follows real time only while the newest candle is on screen
+(lightweight-charts' `shiftVisibleRangeOnNewBar`); scroll back into history and
+the view stays put.
 
-```bash
-npm run build
-npm test
-cd src-tauri && cargo check && cargo test
-```
+</details>
+
+### Releasing (maintainers)
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please):
+conventional commits on `main` maintain a version-bump PR; merging it runs the
+test suite, builds all four platform bundles, and publishes the GitHub release
+only if everything passes.
+
+## Data notes
+
+- Market data comes from Yahoo Finance's **unofficial** endpoints, which can
+  change without notice. The quote endpoint's cookie + crumb authentication is
+  acquired and refreshed automatically.
+- Yahoo rate-limits aggressively per IP. If the app sits in a 429 cooldown loop
+  for a long time, the IP is likely temporarily banned — lower the request rate
+  or wait it out.
+- Intraday history is bounded by Yahoo's retention: 1m ≈ 30 days, 5m–30m ≈ 60
+  days, hourly ≈ 2 years, daily unlimited. Quality and latency vary by symbol
+  and session.
+
+> [!WARNING]
+> MZ Stock Ticker is for personal, informational use only. Nothing it displays
+> is investment advice, and the data should not be relied on for trading.
+
+---
+
+<div align="center">
+
+Built with [Tauri](https://tauri.app) and
+[lightweight-charts](https://github.com/tradingview/lightweight-charts)
+
+</div>
