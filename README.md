@@ -64,10 +64,10 @@ Grab the latest build for your platform from the
 | Windows               | `MZ.Stock.Ticker_x.y.z_x64-setup.exe` (or the `.msi`) |
 | Linux                 | `.AppImage` (most portable), `.deb`, or `.rpm`       |
 
-> [!IMPORTANT]
-> **macOS:** builds are not code-signed, so Gatekeeper will report the app as
-> "damaged" or from an unidentified developer on first launch. After copying it
-> to Applications, clear the quarantine flag:
+> [!NOTE]
+> **macOS:** releases after v0.2.0 are signed and notarized. If you're running
+> v0.2.0 (unsigned), Gatekeeper will report the app as "damaged" on first
+> launch — after copying it to Applications, clear the quarantine flag:
 >
 > ```bash
 > xattr -r -d com.apple.quarantine "/Applications/MZ Stock Ticker.app"
