@@ -65,12 +65,31 @@ pub async fn fetch_aggregates(
     let range = yahoo_range_from_days(days);
     let interval = yahoo_interval(&timespan, multiplier, range);
 
-    debug_log(&format!(
-        "aggs:req ticker={} interval={} range={} from={} to={}",
-        ticker, interval, range, from, to
-    ));
+    // Honour the requested window exactly when the dates parse: scroll-back
+    // history loads depend on it. The `range` string still drives interval
+    // selection and remains the fallback for unparsable dates.
+    let now = chrono::Utc::now().timestamp();
+    let period1 = ny_date_epoch_seconds(&from);
+    let period2 = ny_date_epoch_seconds(&to)
+        .and_then(|seconds| seconds.checked_add(86_400))
+        .map(|seconds| seconds.min(now));
 
-    let mut results = fetch_chart_bars(&ticker, range, &interval).await?;
+    let mut results = match (period1, period2) {
+        (Some(p1), Some(p2)) if p1 < p2 => {
+            debug_log(&format!(
+                "aggs:req ticker={} interval={} period1={} period2={} from={} to={}",
+                ticker, interval, p1, p2, from, to
+            ));
+            fetch_chart_bars_window(&ticker, &interval, p1, p2).await?
+        }
+        _ => {
+            debug_log(&format!(
+                "aggs:req ticker={} interval={} range={} from={} to={}",
+                ticker, interval, range, from, to
+            ));
+            fetch_chart_bars(&ticker, range, &interval).await?
+        }
+    };
 
     let bucket_ms = interval_to_ms(multiplier, &timespan);
 

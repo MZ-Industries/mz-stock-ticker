@@ -28,6 +28,12 @@ const MOVING_AVERAGE_COLORS = ["#60a5fa", "#f59e0b", "#a78bfa", "#fb7185"] as co
 // charts would just bounce rounding noise back and forth forever.
 const RANGE_SYNC_EPSILON = 1e-4;
 
+// Scrolling to within this many bars of the data's left edge asks for older
+// history. The suppression window keeps a programmatic view reset (fitContent,
+// restored zoom) from looking like the user scrolled back.
+const BACKFILL_TRIGGER_BARS = 15;
+const VIEW_RESET_SUPPRESS_MS = 1500;
+
 const UP_COLOR = "#34d399";
 const DOWN_COLOR = "#f87171";
 
@@ -39,6 +45,8 @@ export type ChartControllerDeps = {
   clearSessionShading: (container: HTMLDivElement) => void;
   getStoredVisibleRange: (viewKey: string) => VisibleRange | null;
   onVisibleRangeChange: (viewKey: string, range: VisibleRange) => void;
+  /** Fired when the user scrolls close to the oldest loaded bar. */
+  onNeedOlderData?: () => void;
 };
 
 export type ChartRenderRequest = {
@@ -48,6 +56,18 @@ export type ChartRenderRequest = {
   movingAveragePeriods: number[];
   /** Official previous close; drawn as a dashed reference line when set. */
   previousClose: number | null;
+  /**
+   * Initial window to show when no better view applies (e.g. 1D shows the
+   * latest session even though the series holds several days). When set it
+   * takes precedence over any stored visible range.
+   */
+  defaultVisibleRange: VisibleRange | null;
+  /**
+   * Number of bars prepended since the previous render. The visible window is
+   * shifted by this amount so the user keeps looking at the same candles while
+   * older history streams in behind them.
+   */
+  prependedBars?: number;
   /** Key the saved visible range is stored under (ticker + range preset). */
   viewKey: string;
   /**
@@ -177,6 +197,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   let priceSeries: ISeriesApi<SeriesType> | null = null;
   let volumeSeries: ISeriesApi<"Histogram"> | null = null;
   const movingAverageSeries = new Map<number, ISeriesApi<"Line">>();
+  const movingAverageAppliedStyle = new Map<number, string>();
   let resizeObserver: ResizeObserver | null = null;
 
   let bars: AggregateBar[] = [];
@@ -189,6 +210,21 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   let previousClose: number | null = null;
   let previousCloseLine: IPriceLine | null = null;
   let legendEl: HTMLDivElement | null = null;
+  let defaultVisibleRange: VisibleRange | null = null;
+  let lastViewResetAtMs = 0;
+
+  const maybeRequestOlderData = (range: VisibleRange | null): void => {
+    if (!range || bars.length === 0 || !deps.onNeedOlderData) {
+      return;
+    }
+    if (Date.now() - lastViewResetAtMs < VIEW_RESET_SUPPRESS_MS) {
+      return;
+    }
+    if (range.from > BACKFILL_TRIGGER_BARS) {
+      return;
+    }
+    deps.onNeedOlderData();
+  };
 
   const renderLegend = (index: number): void => {
     if (!legendEl) {
@@ -348,7 +384,10 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     const price = priceChart;
     const volume = volumeChart;
     price.subscribeCrosshairMove(renderLegendForCrosshair);
-    price.timeScale().subscribeVisibleLogicalRangeChange(() => mirrorRange(price, volume));
+    price.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      mirrorRange(price, volume);
+      maybeRequestOlderData(range);
+    });
     volume.timeScale().subscribeVisibleLogicalRangeChange(() => mirrorRange(volume, price));
 
     resizeObserver = new ResizeObserver(() => {
@@ -390,6 +429,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       if (!wanted.includes(period)) {
         priceChart.removeSeries(series);
         movingAverageSeries.delete(period);
+        movingAverageAppliedStyle.delete(period);
       }
     }
 
@@ -398,13 +438,22 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
         color: MOVING_AVERAGE_COLORS[index % MOVING_AVERAGE_COLORS.length],
         lineWidth: (period >= 200 ? 2 : 1) as LineWidth,
       };
+      const styleKey = `${options.color}:${options.lineWidth}`;
 
+      // Never applyOptions() on these sparse Line series: in lightweight-charts
+      // 5.2 it schedules an item re-style pass that crashes ("Value is null")
+      // on the next zoom. Styling only changes when the set of enabled MAs
+      // changes, so recreating the series then is cheap and safe.
       const existing = movingAverageSeries.get(period);
-      if (existing) {
-        existing.applyOptions(options);
+      if (existing && movingAverageAppliedStyle.get(period) === styleKey) {
         return;
       }
+      if (existing) {
+        priceChart!.removeSeries(existing);
+        movingAverageSeries.delete(period);
+      }
 
+      movingAverageAppliedStyle.set(period, styleKey);
       movingAverageSeries.set(
         period,
         priceChart!.addSeries(LineSeries, {
@@ -443,7 +492,16 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     newestSeriesTime = bars.length > 0 ? toSeconds(bars[bars.length - 1]) : null;
 
     for (const [period, series] of movingAverageSeries) {
-      series.setData(buildMovingAverageData(bars, period));
+      const data = buildMovingAverageData(bars, period);
+      if (data.length === 0) {
+        // A series with no points crashes lightweight-charts' bar colorer on
+        // crosshair moves (e.g. MA 200 over a series shorter than 200 bars).
+        priceChart?.removeSeries(series);
+        movingAverageSeries.delete(period);
+        movingAverageAppliedStyle.delete(period);
+        continue;
+      }
+      series.setData(data);
     }
 
     syncPreviousCloseLine();
@@ -481,6 +539,14 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       return;
     }
 
+    lastViewResetAtMs = Date.now();
+
+    if (defaultVisibleRange) {
+      priceChart.timeScale().setVisibleLogicalRange(defaultVisibleRange);
+      volumeChart.timeScale().setVisibleLogicalRange(defaultVisibleRange);
+      return;
+    }
+
     const restored = restorableRange(bars.length);
     if (restored) {
       priceChart.timeScale().setVisibleLogicalRange(restored);
@@ -510,14 +576,32 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     bars = request.bars;
     viewKey = request.viewKey;
     previousClose = request.previousClose;
+    defaultVisibleRange = request.defaultVisibleRange;
     syncPriceSeries(request.chartType);
     syncMovingAverageSeries(request.movingAveragePeriods);
+
+    // setData keeps logical indices, and prepending shifts what every index
+    // means - capture the window first and re-apply it shifted so the user
+    // keeps looking at the same candles.
+    const prepended = !firstRender && request.prependedBars ? request.prependedBars : 0;
+    const preservedRange = prepended > 0
+      ? priceChart!.timeScale().getVisibleLogicalRange()
+      : null;
+
     applyData();
 
-    // Only a genuine change of what is being charted re-applies the saved view.
-    // A periodic data refresh must leave the time scale exactly where the user
-    // left it - that is what used to make the chart jump and rescale.
-    if (firstRender || request.resetKey !== resetKey) {
+    if (preservedRange) {
+      const shifted = {
+        from: preservedRange.from + prepended,
+        to: preservedRange.to + prepended,
+      };
+      lastViewResetAtMs = Date.now();
+      priceChart!.timeScale().setVisibleLogicalRange(shifted);
+      volumeChart!.timeScale().setVisibleLogicalRange(shifted);
+    } else if (firstRender || request.resetKey !== resetKey) {
+      // Only a genuine change of what is being charted re-applies the saved view.
+      // A periodic data refresh must leave the time scale exactly where the user
+      // left it - that is what used to make the chart jump and rescale.
       resetKey = request.resetKey;
       restoreView();
     }
@@ -604,10 +688,12 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     priceSeries = null;
     volumeSeries = null;
     movingAverageSeries.clear();
+    movingAverageAppliedStyle.clear();
     resetKey = null;
     newestSeriesTime = null;
     previousClose = null;
     previousCloseLine = null;
+    defaultVisibleRange = null;
   };
 
   return { render, applyLiveBars, getVisibleLogicalRange, dispose };

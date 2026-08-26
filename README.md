@@ -9,6 +9,11 @@ Desktop stock dashboard built with Tauri + Rust + TypeScript, styled after Apple
 - Multiple chart modes (line, area, baseline, candlestick, bar)
 - Crosshair OHLC/volume legend on the price chart
 - Previous-close reference line on the 1D chart
+- 1D holds several sessions: it opens on the latest one (pre-market included) and
+  scrolling left reveals prior days, with non-regular hours shaded per session
+- Infinite scroll-back: nearing the oldest loaded bar fetches older history in
+  chunks, on every range (bounded by Yahoo's intraday retention: 1m ~30 days,
+  5m-30m ~60 days, hourly ~2 years, daily unlimited)
 - Key statistics strip (open, day range, prev close, volume, avg volume, 52-week range, market cap, P/E, EPS, dividend yield)
 - Dedicated volume chart below price chart
 - Moving average overlays (20 / 50 / 200)

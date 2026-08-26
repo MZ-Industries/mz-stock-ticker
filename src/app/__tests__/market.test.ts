@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { CANDLE_INTERVAL_OPTIONS, RANGES } from "../constants";
 import {
+  backfillChunkDays,
+  collectRegularSessions,
   effectiveAggregationPreset,
   getBarDateRange,
   isCandleIntervalRelevant,
-  selectOneDaySession,
 } from "../market";
 import type { AggregateBar, RangePreset } from "../types";
 
@@ -60,20 +61,36 @@ describe("getBarDateRange", () => {
   });
 });
 
-describe("selectOneDaySession", () => {
-  it("returns the latest session that has regular-hours bars", () => {
-    const result = selectOneDaySession([bar(PREV_DAY_1000), bar(NY_1000), bar(NY_1030)]);
-    expect(result.sessionDate).toBe("2026-08-21");
-    expect(result.bars).toHaveLength(2);
+describe("collectRegularSessions", () => {
+  it("finds one open/close pair per trading day, skipping extended-hours bars", () => {
+    const preMarket = Date.UTC(2026, 7, 21, 12, 0); // 08:00 ET
+    const sessions = collectRegularSessions([
+      bar(PREV_DAY_1000),
+      bar(preMarket),
+      bar(NY_1000),
+      bar(NY_1030),
+    ]);
+
+    expect(sessions).toEqual([
+      { openMs: PREV_DAY_1000, closeMs: PREV_DAY_1000 },
+      { openMs: NY_1000, closeMs: NY_1030 },
+    ]);
   });
 
-  it("keeps a pre-market-only latest session (early morning view)", () => {
-    const result = selectOneDaySession([bar(NY_1000), bar(SAT_0800)]);
-    expect(result.sessionDate).toBe("2026-08-22");
-    expect(result.bars).toHaveLength(1);
+  it("returns no sessions for a pre-market-only series", () => {
+    expect(collectRegularSessions([bar(SAT_0800)])).toEqual([]);
   });
 
   it("handles an empty series", () => {
-    expect(selectOneDaySession([])).toEqual({ bars: [], sessionDate: null });
+    expect(collectRegularSessions([])).toEqual([]);
+  });
+});
+
+describe("backfillChunkDays", () => {
+  it("keeps intraday chunks inside Yahoo's per-request limits", () => {
+    expect(backfillChunkDays({ multiplier: 1, timespan: "minute" })).toBe(5);
+    expect(backfillChunkDays({ multiplier: 5, timespan: "minute" })).toBe(15);
+    expect(backfillChunkDays({ multiplier: 1, timespan: "hour" })).toBe(60);
+    expect(backfillChunkDays({ multiplier: 1, timespan: "day" })).toBe(730);
   });
 });

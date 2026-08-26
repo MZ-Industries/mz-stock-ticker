@@ -270,16 +270,21 @@ export function toNyIsoDate(daysBack: number): string {
   return `${year}-${month}-${day}`;
 }
 
+// Reused across calls: getNyParts runs per bar in chart-repaint paths, and
+// constructing an Intl.DateTimeFormat is orders of magnitude more expensive
+// than formatting with one.
+const NY_PARTS_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
 export function getNyParts(timestampMs: number): { date: string; hour: number; minute: number } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date(timestampMs));
+  const parts = NY_PARTS_FORMATTER.formatToParts(new Date(timestampMs));
 
   const year = parts.find((part) => part.type === "year")?.value ?? "1970";
   const month = parts.find((part) => part.type === "month")?.value ?? "01";

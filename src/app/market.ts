@@ -144,37 +144,69 @@ export function getExtendedStripFromBars(params: {
   };
 }
 
-export function selectOneDaySession(bars: AggregateBar[]): { bars: AggregateBar[]; sessionDate: string | null } {
+export type RegularSession = { openMs: number; closeMs: number };
+
+let sessionCacheKey = "";
+let sessionCache: RegularSession[] = [];
+
+/**
+ * First/last regular-hours bar per NY trading day, chronological. Memoised on
+ * the series identity because shading recomputes on every pan frame.
+ */
+export function collectRegularSessions(bars: AggregateBar[]): RegularSession[] {
   if (bars.length === 0) {
-    return { bars: [], sessionDate: null };
+    return [];
   }
 
-  const grouped = new Map<string, AggregateBar[]>();
+  const key = `${bars.length}:${bars[0].t}:${bars[bars.length - 1].t}`;
+  if (key === sessionCacheKey) {
+    return sessionCache;
+  }
+
+  const sessions: RegularSession[] = [];
+  let currentDate = "";
+  let openMs = 0;
+  let closeMs = 0;
+
   for (const bar of bars) {
-    const date = getNyParts(bar.t).date;
-    const existing = grouped.get(date) ?? [];
-    existing.push(bar);
-    grouped.set(date, existing);
-  }
-
-  const dates = Array.from(grouped.keys()).sort();
-  const latestDate = dates[dates.length - 1];
-  const latestSessionBars = grouped.get(latestDate) ?? [];
-  const latestRegularCount = latestSessionBars.filter(isRegularMarketHour).length;
-  if (latestSessionBars.length > 0 && latestRegularCount === 0) {
-    return { bars: latestSessionBars, sessionDate: latestDate };
-  }
-
-  for (let i = dates.length - 1; i >= 0; i -= 1) {
-    const date = dates[i];
-    const sessionBars = grouped.get(date) ?? [];
-    const regular = sessionBars.filter(isRegularMarketHour);
-    if (regular.length > 0) {
-      return { bars: sessionBars, sessionDate: date };
+    if (!isRegularMarketHour(bar)) {
+      continue;
     }
+
+    const date = getNyParts(bar.t).date;
+    if (date !== currentDate) {
+      if (currentDate) {
+        sessions.push({ openMs, closeMs });
+      }
+      currentDate = date;
+      openMs = bar.t;
+    }
+    closeMs = bar.t;
   }
 
-  return { bars: grouped.get(latestDate) ?? [], sessionDate: latestDate };
+  if (currentDate) {
+    sessions.push({ openMs, closeMs });
+  }
+
+  sessionCacheKey = key;
+  sessionCache = sessions;
+  return sessions;
+}
+
+/**
+ * How far back one scroll-triggered history load reaches. Sized so intraday
+ * chunks stay inside Yahoo's per-request limits; the per-interval retention
+ * floors (1m ~30d, 5-30m ~60d, hourly ~2y) end the backfill with a hard error
+ * that callers treat as "no more history".
+ */
+export function backfillChunkDays(preset: { multiplier: number; timespan: "minute" | "hour" | "day" }): number {
+  if (preset.timespan === "minute") {
+    return preset.multiplier === 1 ? 5 : 15;
+  }
+  if (preset.timespan === "hour") {
+    return 60;
+  }
+  return 730;
 }
 
 export function getBarDateRange(selectedRange: RangePreset): { from: string; to: string } {
@@ -200,6 +232,11 @@ export function clearSessionShading(container: HTMLDivElement): void {
   }
 }
 
+/**
+ * Shades everything outside regular trading hours. The series can span many
+ * sessions, so the shading is a run of blocks: chart-left to the first visible
+ * open, each close-to-next-open gap, and the last close to chart-right.
+ */
 export function renderSessionShading(params: {
   chart: IChartApi;
   container: HTMLDivElement;
@@ -208,51 +245,62 @@ export function renderSessionShading(params: {
 }): void {
   const { chart, container, selectedRange, latestBars } = params;
 
-  let overlay = container.querySelector(".session-shade-overlay") as HTMLDivElement | null;
-
   if (selectedRange.label !== "1D" || latestBars.length === 0) {
     clearSessionShading(container);
     return;
   }
 
-  const regularBars = latestBars.filter(isRegularMarketHour);
-  if (regularBars.length === 0) {
-    clearSessionShading(container);
-    return;
-  }
-
-  const openTs = Math.floor(regularBars[0].t / 1000) as UTCTimestamp;
-  const closeTs = Math.floor(regularBars[regularBars.length - 1].t / 1000) as UTCTimestamp;
-  const openX = chart.timeScale().timeToCoordinate(openTs);
-  const closeX = chart.timeScale().timeToCoordinate(closeTs);
-  if (openX === null || closeX === null) {
+  const timeScale = chart.timeScale();
+  const visible = timeScale.getVisibleRange();
+  if (!visible || typeof visible.from !== "number" || typeof visible.to !== "number") {
     clearSessionShading(container);
     return;
   }
 
   const width = container.clientWidth;
-  const leftWidth = clamp(0, width, openX);
-  const rightStart = clamp(0, width, closeX);
-  const rightWidth = Math.max(0, width - rightStart);
+  const visibleFromSec = visible.from as number;
+  const visibleToSec = visible.to as number;
 
+  // Session boundaries are bar timestamps, so timeToCoordinate resolves them
+  // whenever they are on screen; off-screen boundaries clamp to the edges.
+  const coordFor = (timestampMs: number): number => {
+    const seconds = Math.floor(timestampMs / 1000);
+    if (seconds <= visibleFromSec) {
+      return 0;
+    }
+    if (seconds >= visibleToSec) {
+      return width;
+    }
+    const coord = timeScale.timeToCoordinate(seconds as UTCTimestamp);
+    if (coord === null) {
+      return seconds < (visibleFromSec + visibleToSec) / 2 ? 0 : width;
+    }
+    return clamp(0, width, coord);
+  };
+
+  const blocks: Array<{ left: number; width: number }> = [];
+  let cursor = 0;
+  for (const session of collectRegularSessions(latestBars)) {
+    const openX = coordFor(session.openMs);
+    const closeX = coordFor(session.closeMs);
+    if (openX > cursor + 0.5) {
+      blocks.push({ left: cursor, width: openX - cursor });
+    }
+    cursor = Math.max(cursor, closeX);
+  }
+  if (cursor < width - 0.5) {
+    blocks.push({ left: cursor, width: width - cursor });
+  }
+
+  let overlay = container.querySelector(".session-shade-overlay") as HTMLDivElement | null;
   if (!overlay) {
     overlay = document.createElement("div");
     overlay.className = "session-shade-overlay";
-
-    const left = document.createElement("div");
-    left.className = "session-shade-block session-shade-left";
-
-    const right = document.createElement("div");
-    right.className = "session-shade-block session-shade-right";
-
-    overlay.append(left, right);
     container.appendChild(overlay);
   }
 
-  const left = overlay.querySelector(".session-shade-left") as HTMLDivElement;
-  const right = overlay.querySelector(".session-shade-right") as HTMLDivElement;
-  left.style.left = "0px";
-  left.style.width = `${leftWidth}px`;
-  right.style.left = `${rightStart}px`;
-  right.style.width = `${rightWidth}px`;
+  overlay.innerHTML = blocks
+    .map((block) =>
+      `<div class="session-shade-block" style="left:${block.left.toFixed(1)}px;width:${block.width.toFixed(1)}px"></div>`)
+    .join("");
 }

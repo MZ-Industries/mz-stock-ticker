@@ -1,3 +1,4 @@
+import { loadOlderBars } from "./app/actions";
 import { initChartPanel } from "./app/chartPanel";
 import { initElements } from "./app/elements";
 import {
@@ -12,7 +13,11 @@ const root = document.querySelector("#app") as HTMLDivElement;
 root.innerHTML = APP_TEMPLATE;
 
 initElements(root);
-initChartPanel();
+initChartPanel({
+  onNeedOlderData: () => {
+    void loadOlderBars();
+  },
+});
 
 registerWatchlistEventHandlers();
 registerGlobalEventHandlers();

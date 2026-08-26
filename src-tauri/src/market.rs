@@ -578,6 +578,14 @@ pub(crate) fn live_poll_interval() -> Duration {
     }
 }
 
+/// Epoch seconds for New York local midnight of an ISO `YYYY-MM-DD` date.
+pub(crate) fn ny_date_epoch_seconds(date: &str) -> Option<i64> {
+    let (y, m, d) = parse_ymd(date)?;
+    let local = New_York.with_ymd_and_hms(y, m, d, 0, 0, 0);
+    let resolved = local.single().or_else(|| local.earliest())?;
+    Some(resolved.timestamp())
+}
+
 /// Fetches candles from Yahoo's chart endpoint and snaps intraday ones onto their
 /// interval grid. Shared by the one-shot history fetch and the live poller so both
 /// see identical timestamps.
@@ -586,10 +594,41 @@ pub(crate) async fn fetch_chart_bars(
     range: &str,
     interval: &str,
 ) -> Result<Vec<AggregateBar>, String> {
+    fetch_chart_bars_query(ticker, interval, &[("range", range.to_string())]).await
+}
+
+/// Same as `fetch_chart_bars` but bounded to an explicit epoch-seconds window,
+/// which is what scroll-back history loading needs. Yahoo rejects windows older
+/// than its per-interval retention (e.g. ~60 days for 5m data) with a hard HTTP
+/// error; callers treat that as "no more history".
+pub(crate) async fn fetch_chart_bars_window(
+    ticker: &str,
+    interval: &str,
+    period1: i64,
+    period2: i64,
+) -> Result<Vec<AggregateBar>, String> {
+    fetch_chart_bars_query(
+        ticker,
+        interval,
+        &[
+            ("period1", period1.to_string()),
+            ("period2", period2.to_string()),
+        ],
+    )
+    .await
+}
+
+async fn fetch_chart_bars_query(
+    ticker: &str,
+    interval: &str,
+    window_params: &[(&str, String)],
+) -> Result<Vec<AggregateBar>, String> {
     let mut url = Url::parse(&format!("{}/v8/finance/chart/{}", yahoo_base_url(), ticker))
         .map_err(|err| format!("Bad Yahoo chart URL: {}", err))?;
+    for (key, value) in window_params {
+        url.query_pairs_mut().append_pair(key, value);
+    }
     url.query_pairs_mut()
-        .append_pair("range", range)
         .append_pair("interval", interval)
         .append_pair("includePrePost", "true")
         .append_pair("events", "div,split");
@@ -903,6 +942,28 @@ mod tests {
         assert!(same_bars(&a, &same));
         assert!(!same_bars(&a, &revised));
         assert!(!same_bars(&a, &[]));
+    }
+
+    #[test]
+    fn ny_date_epoch_handles_dst_transitions() {
+        // Winter: NY midnight is 05:00 UTC.
+        assert_eq!(
+            ny_date_epoch_seconds("2026-01-15"),
+            Some(chrono::Utc.with_ymd_and_hms(2026, 1, 15, 5, 0, 0).unwrap().timestamp())
+        );
+        // Summer: NY midnight is 04:00 UTC.
+        assert_eq!(
+            ny_date_epoch_seconds("2026-08-25"),
+            Some(chrono::Utc.with_ymd_and_hms(2026, 8, 25, 4, 0, 0).unwrap().timestamp())
+        );
+        // Spring-forward day is 23 hours long, fall-back day is 25.
+        let spring = ny_date_epoch_seconds("2026-03-08").unwrap();
+        let after_spring = ny_date_epoch_seconds("2026-03-09").unwrap();
+        assert_eq!(after_spring - spring, 23 * 3600);
+        let fall = ny_date_epoch_seconds("2026-11-01").unwrap();
+        let after_fall = ny_date_epoch_seconds("2026-11-02").unwrap();
+        assert_eq!(after_fall - fall, 25 * 3600);
+        assert_eq!(ny_date_epoch_seconds("not-a-date"), None);
     }
 
     #[test]

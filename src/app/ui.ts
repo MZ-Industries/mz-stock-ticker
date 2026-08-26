@@ -66,7 +66,7 @@ export function updateHeadline(): void {
     els.headlinePriceEl.classList.remove("hidden");
     els.headlinePriceEl.textContent = fmtNumber(stripData.closePrice);
     els.headlineChangeEl.classList.remove("hidden");
-    els.headlineChangeEl.textContent = `${stripData.closeChangePct >= 0 ? "+" : ""}${fmtPct(stripData.closeChangePct)}`;
+    els.headlineChangeEl.textContent = fmtPct(stripData.closeChangePct);
     els.headlineChangeEl.className = `subtle ${stripData.closeChangePct >= 0 ? "up" : "down"}`;
 
     const afterLabel = stripData.isPreMarket ? "Pre" : "After";

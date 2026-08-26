@@ -4,11 +4,16 @@ import { els } from "./elements";
 import { clearSessionShading, renderSessionShading } from "./market";
 import { getStoredVisibleRange, onVisibleRangeChange } from "./prefs";
 import { currentAggregationPreset, currentChartResetKey, currentChartViewKey, state } from "./store";
+import { getNyParts } from "./utils";
 import type { AggregateBar } from "./types";
 
 let controller: ChartController | null = null;
 
-export function initChartPanel(): void {
+export type ChartPanelOptions = {
+  onNeedOlderData?: () => void;
+};
+
+export function initChartPanel(options: ChartPanelOptions = {}): void {
   controller = createChartController({
     priceContainer: els.priceChartEl,
     volumeContainer: els.volumeChartEl,
@@ -22,7 +27,15 @@ export function initChartPanel(): void {
       }),
     clearSessionShading,
     getStoredVisibleRange,
-    onVisibleRangeChange,
+    onVisibleRangeChange: (viewKey, range) => {
+      // 1D always opens on the latest session, so persisting its zoom would
+      // only replay a stale window over a series whose length keeps changing.
+      if (viewKey.endsWith(":1D")) {
+        return;
+      }
+      onVisibleRangeChange(viewKey, range);
+    },
+    onNeedOlderData: options.onNeedOlderData,
   });
 }
 
@@ -54,13 +67,47 @@ function previousCloseForChart(): number | null {
   return null;
 }
 
-export function renderCharts(): void {
+/**
+ * The 1D series spans several days so older sessions stay reachable by
+ * scrolling, but the opening view should still read as "today": the latest
+ * session, padded out with the prior session's tail when the day is young
+ * (early pre-market would otherwise be a handful of giant candles).
+ */
+function defaultViewForOneDay(): VisibleRange | null {
+  if (state.selectedRange.label !== "1D") {
+    return null;
+  }
+
+  const bars = state.latestBars;
+  if (bars.length === 0) {
+    return null;
+  }
+
+  const sessionDate = state.activeSessionDate ?? getNyParts(bars[bars.length - 1].t).date;
+  let firstIndex = bars.length - 1;
+  while (firstIndex > 0 && getNyParts(bars[firstIndex - 1].t).date === sessionDate) {
+    firstIndex -= 1;
+  }
+
+  const multiplier = Math.max(1, currentAggregationPreset().multiplier);
+  const minWidthBars = Math.round(390 / multiplier);
+  let from = firstIndex - 0.5;
+  if (bars.length - firstIndex < minWidthBars) {
+    from = Math.max(-0.5, bars.length - minWidthBars - 0.5);
+  }
+
+  return { from, to: bars.length + 2.5 };
+}
+
+export function renderCharts(prependedBars?: number): void {
   controller?.render({
     bars: state.latestBars,
     chartType: state.selectedChartType,
     timespan: currentAggregationPreset().timespan,
     movingAveragePeriods: state.selectedMovingAveragePeriods,
     previousClose: previousCloseForChart(),
+    defaultVisibleRange: defaultViewForOneDay(),
+    prependedBars,
     viewKey: currentChartViewKey(),
     resetKey: currentChartResetKey(),
   });

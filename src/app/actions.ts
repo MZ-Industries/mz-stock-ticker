@@ -2,11 +2,12 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import * as api from "./api";
 import { pushLiveBars, renderCharts } from "./chartPanel";
 import { els } from "./elements";
-import { getBarDateRange, selectOneDaySession } from "./market";
+import { backfillChunkDays, getBarDateRange } from "./market";
 import { trackRefreshScope } from "./progress";
 import { barsRefreshCadenceMs, loadProviderStatus, updateLagPill } from "./provider";
 import {
   currentAggregationPreset,
+  currentChartResetKey,
   debugLog,
   enterApiCooldown,
   isApiCooldownActive,
@@ -28,6 +29,10 @@ import type { AggregateBar, LiveBarsEvent } from "./types";
 
 let unlistenLiveBars: UnlistenFn | null = null;
 let barsRefreshTimer: number | null = null;
+let lastLoadedResetKey = "";
+let backfillKey = "";
+let backfillInFlight = false;
+let backfillExhausted = false;
 
 async function fetchBars(
   from: string,
@@ -124,15 +129,27 @@ export async function loadBars(): Promise<void> {
       return;
     }
 
+    // A periodic refresh only refetches the recent window; keep any older bars
+    // scroll-back already loaded so the user's history does not vanish.
+    const resetKey = currentChartResetKey();
+    if (resetKey === lastLoadedResetKey && state.latestBars.length > 0) {
+      const cutoff = bars[0].t;
+      const preserved = state.latestBars.filter((bar) => bar.t < cutoff);
+      if (preserved.length > 0) {
+        bars = [...preserved, ...bars];
+      }
+    }
+    lastLoadedResetKey = resetKey;
+
     if (state.selectedRange.label === "1D") {
-      const session = selectOneDaySession(bars);
-      bars = session.bars;
-      state.activeSessionDate = session.sessionDate;
+      // The series spans several sessions; the latest one is what the headline
+      // and extended-hours strip describe.
+      state.activeSessionDate = getNyParts(bars[bars.length - 1].t).date;
       debugLog("loadBars:1d-session", {
-        sessionDate: session.sessionDate,
+        sessionDate: state.activeSessionDate,
         count: bars.length,
-        firstEt: bars[0] ? formatEt(bars[0].t) : null,
-        lastEt: bars[bars.length - 1] ? formatEt(bars[bars.length - 1].t) : null,
+        firstEt: formatEt(bars[0].t),
+        lastEt: formatEt(bars[bars.length - 1].t),
       });
     } else {
       state.activeSessionDate = null;
@@ -282,11 +299,7 @@ export function applyLiveBars(event: LiveBarsEvent): void {
     return;
   }
 
-  let incoming = event.bars.filter((bar) => bar.t > 0);
-  if (state.selectedRange.label === "1D" && state.activeSessionDate) {
-    incoming = incoming.filter((bar) => getNyParts(bar.t).date === state.activeSessionDate);
-  }
-
+  const incoming = event.bars.filter((bar) => bar.t > 0);
   const changed = spliceLiveBars(state.latestBars, incoming);
   if (changed.length === 0) {
     return;
@@ -406,6 +419,75 @@ export async function selectTickerAndRefresh(ticker: string): Promise<void> {
   persistPrefs();
   renderStats();
   await refreshAll();
+}
+
+/**
+ * Loads one chunk of history older than the oldest bar on screen; the chart
+ * asks for it when the user scrolls near the left edge. Single-flight, and a
+ * chunk that comes back empty or rejected marks the current view exhausted -
+ * Yahoo answers a hard error once an intraday window falls out of retention.
+ */
+export async function loadOlderBars(): Promise<void> {
+  const key = currentChartResetKey();
+  if (key !== backfillKey) {
+    backfillKey = key;
+    backfillExhausted = false;
+  }
+
+  if (backfillInFlight || backfillExhausted || isApiCooldownActive() || state.latestBars.length === 0) {
+    return;
+  }
+
+  backfillInFlight = true;
+  const endRefresh = trackRefreshScope();
+  let success = false;
+
+  try {
+    const oldestMs = state.latestBars[0].t;
+    const effective = currentAggregationPreset();
+    const chunkDays = backfillChunkDays(effective);
+    const from = getNyParts(oldestMs - chunkDays * 86_400_000).date;
+    const to = getNyParts(oldestMs).date;
+    debugLog("backfill:start", { from, to, key });
+
+    let older: AggregateBar[] = [];
+    try {
+      older = await api.fetchAggregates({
+        ticker: state.selectedTicker,
+        multiplier: effective.multiplier,
+        timespan: effective.timespan,
+        from,
+        to,
+      });
+    } catch (error) {
+      if (isRateLimitError(error)) {
+        enterApiCooldown(error);
+        return;
+      }
+      debugLog("backfill:exhausted-error", String(error));
+      backfillExhausted = true;
+      return;
+    }
+
+    if (key !== currentChartResetKey()) {
+      return; // The user switched views while the chunk was in flight.
+    }
+
+    const fresh = older.filter((bar) => bar.t < oldestMs);
+    if (fresh.length === 0) {
+      debugLog("backfill:exhausted-empty");
+      backfillExhausted = true;
+      return;
+    }
+
+    state.latestBars = [...fresh, ...state.latestBars];
+    renderCharts(fresh.length);
+    debugLog("backfill:prepended", { count: fresh.length, oldestEt: formatEt(fresh[0].t) });
+    success = true;
+  } finally {
+    backfillInFlight = false;
+    endRefresh(success);
+  }
 }
 
 export function clearAdaptiveBarsRefresh(): void {
