@@ -1,58 +1,79 @@
-import { invoke } from "@tauri-apps/api/core";
-import { renderWatchlistRows, setupWatchlistDragAndDrop } from "./watchlist";
-import type { AppPrefs, ChartType, RangePreset, SnapshotItem } from "./types";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import * as api from "./api";
+import {
+  attachLiveBarsListener,
+  clearAdaptiveBarsRefresh,
+  detachLiveBarsListener,
+  loadBars,
+  loadNews,
+  loadSparklines,
+  loadWatchlist,
+  refreshAll,
+  scheduleAdaptiveBarsRefresh,
+  selectTickerAndRefresh,
+  startStream,
+} from "./actions";
+import { disposeCharts, getVisibleLogicalRange, renderCharts } from "./chartPanel";
+import {
+  CANDLE_INTERVAL_OPTIONS,
+  MAX_WATCHLIST_SYMBOLS,
+  MOVING_AVERAGE_PERIOD_OPTIONS,
+  NEWS_REFRESH_MS,
+  RANGES,
+  SPARKLINE_REFRESH_MS,
+  WATCHLIST_REFRESH_MS,
+} from "./constants";
+import { els } from "./elements";
+import { applyStoredPaneSizes, reorderWatchlistSymbols, setupSplitters } from "./layout";
+import { isCandleIntervalRelevant } from "./market";
+import { ensureSelectedTicker, flushVisibleRange, initPrefs, persistWatchlistSymbols } from "./prefs";
+import { startRefreshProgressLoop, stopRefreshProgressLoop } from "./progress";
+import { loadProviderStatus } from "./provider";
+import { hideSearchResults, setupSymbolSearch } from "./search";
+import { debugLog, isApiCooldownActive, persistPrefs, state } from "./store";
+import { renderControls, renderStats } from "./ui";
+import { normalizeTicker } from "./utils";
+import { cycleWatchlistBadgeMode, renderWatchlistRows, setupWatchlistDragAndDrop } from "./watchlist";
+import type { ChartType } from "./types";
 
-export function registerGlobalEventHandlers(params: {
-  rangeGroupEl: HTMLDivElement;
-  intervalGroupEl: HTMLDivElement;
-  maGroupEl: HTMLDivElement;
-  typeGroupEl: HTMLDivElement;
-  ranges: RangePreset[];
-  candleIntervalOptions: Array<{ key: string }>;
-  movingAveragePeriodOptions: readonly number[];
-  scheduleAdaptiveBarsRefresh: () => void;
-  isApiCooldownActive: () => boolean;
-  loadWatchlist: () => Promise<void>;
-  loadBars: () => Promise<void>;
-  startStream: () => Promise<void>;
-  renderControls: () => void;
-  renderCharts: () => void;
-  persistPrefs: () => void;
-  getPrefs: () => AppPrefs;
-  setSelectedRange: (range: RangePreset) => void;
-  setSelectedCandleIntervalKey: (key: string) => void;
-  getSelectedChartType: () => ChartType;
-  setSelectedChartType: (type: ChartType) => void;
-  getSelectedMovingAveragePeriods: () => number[];
-  setSelectedMovingAveragePeriods: (periods: number[]) => void;
-  isCandleIntervalRelevant: () => boolean;
-}): void {
-  const {
-    rangeGroupEl,
-    intervalGroupEl,
-    maGroupEl,
-    typeGroupEl,
-    ranges,
-    candleIntervalOptions,
-    movingAveragePeriodOptions,
-    scheduleAdaptiveBarsRefresh,
-    isApiCooldownActive,
-    loadWatchlist,
-    loadBars,
-    startStream,
-    renderControls,
-    renderCharts,
-    persistPrefs,
-    getPrefs,
-    setSelectedRange,
-    setSelectedCandleIntervalKey,
-    getSelectedChartType,
-    setSelectedChartType,
-    getSelectedMovingAveragePeriods,
-    setSelectedMovingAveragePeriods,
-    isCandleIntervalRelevant,
-  } = params;
+function addSymbolToWatchlist(symbol: string): void {
+  if (!state.watchlistSymbols.includes(symbol)) {
+    state.watchlistSymbols = [symbol, ...state.watchlistSymbols].slice(0, MAX_WATCHLIST_SYMBOLS);
+    persistWatchlistSymbols();
+  }
 
+  void selectTickerAndRefresh(symbol);
+}
+
+function scrollSelectedRowIntoView(): void {
+  const row = els.watchlistListEl.querySelector(".watch-row.selected");
+  row?.scrollIntoView({ block: "nearest" });
+}
+
+let keyboardRefreshTimer: number | null = null;
+
+/**
+ * Arrow-key navigation moves the selection instantly but debounces the data
+ * refresh, so holding a key does not fire a request per row.
+ */
+function selectTickerViaKeyboard(ticker: string): void {
+  state.selectedTicker = ticker;
+  state.prefs.ticker = ticker;
+  persistPrefs();
+  renderWatchlistRows();
+  scrollSelectedRowIntoView();
+  renderStats();
+
+  if (keyboardRefreshTimer !== null) {
+    window.clearTimeout(keyboardRefreshTimer);
+  }
+  keyboardRefreshTimer = window.setTimeout(() => {
+    keyboardRefreshTimer = null;
+    void refreshAll();
+  }, 350);
+}
+
+export function registerGlobalEventHandlers(): void {
   document.addEventListener("visibilitychange", () => {
     scheduleAdaptiveBarsRefresh();
     if (!document.hidden && !isApiCooldownActive()) {
@@ -66,84 +87,108 @@ export function registerGlobalEventHandlers(params: {
     }
   });
 
-  rangeGroupEl.addEventListener("click", async (event) => {
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+      return;
+    }
+
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+      return;
+    }
+
+    const symbols = state.watchlistSymbols;
+    if (symbols.length === 0) {
+      return;
+    }
+
+    const index = symbols.indexOf(state.selectedTicker);
+    const nextIndex = event.key === "ArrowDown"
+      ? Math.min(symbols.length - 1, index + 1)
+      : Math.max(0, index < 0 ? 0 : index - 1);
+
+    if (nextIndex === index) {
+      return;
+    }
+
+    event.preventDefault();
+    selectTickerViaKeyboard(symbols[nextIndex]);
+  });
+
+  els.rangeGroupEl.addEventListener("click", async (event) => {
     const button = (event.target as HTMLElement).closest("[data-range]") as HTMLButtonElement | null;
     if (!button) {
       return;
     }
 
-    const preset = ranges.find((range) => range.label === button.dataset.range);
+    const preset = RANGES.find((range) => range.label === button.dataset.range);
     if (!preset) {
       return;
     }
 
-    setSelectedRange(preset);
-    const prefs = getPrefs();
-    prefs.rangeLabel = preset.label;
+    state.selectedRange = preset;
+    state.prefs.rangeLabel = preset.label;
     persistPrefs();
     renderControls();
     await loadBars();
     await startStream();
   });
 
-  intervalGroupEl.addEventListener("click", async (event) => {
+  els.intervalGroupEl.addEventListener("click", async (event) => {
     const button = (event.target as HTMLElement).closest("[data-candle-interval]") as HTMLButtonElement | null;
     if (!button) {
       return;
     }
 
     const nextKey = button.dataset.candleInterval;
-    if (!nextKey || !candleIntervalOptions.some((item) => item.key === nextKey)) {
+    if (!nextKey || !CANDLE_INTERVAL_OPTIONS.some((item) => item.key === nextKey)) {
       return;
     }
 
-    setSelectedCandleIntervalKey(nextKey);
-    const prefs = getPrefs();
-    prefs.candleIntervalKey = nextKey;
+    state.selectedCandleIntervalKey = nextKey;
+    state.prefs.candleIntervalKey = nextKey;
     persistPrefs();
     renderControls();
     await loadBars();
     await startStream();
   });
 
-  maGroupEl.addEventListener("click", (event) => {
+  els.maGroupEl.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest("[data-ma-period]") as HTMLButtonElement | null;
     if (!button) {
       return;
     }
 
     const period = Number(button.dataset.maPeriod);
-    if (!Number.isInteger(period) || !movingAveragePeriodOptions.includes(period)) {
+    if (!Number.isInteger(period) || !(MOVING_AVERAGE_PERIOD_OPTIONS as readonly number[]).includes(period)) {
       return;
     }
 
-    const previous = getSelectedMovingAveragePeriods();
+    const previous = state.selectedMovingAveragePeriods;
     const next = previous.includes(period)
       ? previous.filter((value) => value !== period)
       : [...previous, period].sort((a, b) => a - b);
 
-    setSelectedMovingAveragePeriods(next);
-    const prefs = getPrefs();
-    prefs.movingAveragePeriods = [...next];
+    state.selectedMovingAveragePeriods = next;
+    state.prefs.movingAveragePeriods = [...next];
     persistPrefs();
     renderControls();
     renderCharts();
   });
 
-  typeGroupEl.addEventListener("click", async (event) => {
+  els.typeGroupEl.addEventListener("click", async (event) => {
     const button = (event.target as HTMLElement).closest("[data-type]") as HTMLButtonElement | null;
     if (!button) {
       return;
     }
 
-    const wasRelevant = isCandleIntervalRelevant();
-    const nextType = (button.dataset.type as ChartType) ?? getSelectedChartType();
-    setSelectedChartType(nextType);
-    const prefs = getPrefs();
-    prefs.chartType = nextType;
+    const wasRelevant = isCandleIntervalRelevant(state.selectedChartType, state.selectedRange);
+    const nextType = (button.dataset.type as ChartType) ?? state.selectedChartType;
+    state.selectedChartType = nextType;
+    state.prefs.chartType = nextType;
     persistPrefs();
 
-    const isRelevant = isCandleIntervalRelevant();
+    const isRelevant = isCandleIntervalRelevant(state.selectedChartType, state.selectedRange);
     renderControls();
 
     if (!wasRelevant && isRelevant) {
@@ -154,48 +199,24 @@ export function registerGlobalEventHandlers(params: {
 
     renderCharts();
   });
+
+  els.newsGridEl.addEventListener("click", (event) => {
+    const card = (event.target as HTMLElement).closest("[data-url]") as HTMLElement | null;
+    const url = card?.dataset.url;
+    if (!url) {
+      return;
+    }
+
+    void openUrl(url).catch((error) => {
+      debugLog("news:open-failed", String(error));
+    });
+  });
 }
 
-export function registerWatchlistEventHandlers(params: {
-  watchlistEl: HTMLDivElement;
-  watchlistAddFormEl: HTMLFormElement;
-  watchlistAddInputEl: HTMLInputElement;
-  isSuppressWatchlistClick: () => boolean;
-  setSuppressWatchlistClick: (value: boolean) => void;
-  getWatchlistSymbols: () => string[];
-  setWatchlistSymbols: (symbols: string[]) => void;
-  persistWatchlistSymbols: () => void;
-  getSelectedTicker: () => string;
-  ensureSelectedTicker: () => void;
-  getPrefs: () => AppPrefs;
-  persistPrefs: () => void;
-  refreshAll: () => Promise<void>;
-  loadWatchlist: () => Promise<void>;
-  selectTickerAndRefresh: (ticker: string) => Promise<void>;
-  normalizeTicker: (raw: string) => string | null;
-}): void {
-  const {
-    watchlistEl,
-    watchlistAddFormEl,
-    watchlistAddInputEl,
-    isSuppressWatchlistClick,
-    setSuppressWatchlistClick,
-    getWatchlistSymbols,
-    setWatchlistSymbols,
-    persistWatchlistSymbols,
-    getSelectedTicker,
-    ensureSelectedTicker,
-    getPrefs,
-    persistPrefs,
-    refreshAll,
-    loadWatchlist,
-    selectTickerAndRefresh,
-    normalizeTicker,
-  } = params;
-
-  watchlistEl.addEventListener("click", async (event) => {
-    if (isSuppressWatchlistClick()) {
-      setSuppressWatchlistClick(false);
+export function registerWatchlistEventHandlers(): void {
+  els.watchlistEl.addEventListener("click", async (event) => {
+    if (state.suppressWatchlistClick) {
+      state.suppressWatchlistClick = false;
       event.preventDefault();
       return;
     }
@@ -203,33 +224,27 @@ export function registerWatchlistEventHandlers(params: {
     const removeButton = (event.target as HTMLElement).closest("[data-remove-ticker]") as HTMLButtonElement | null;
     if (removeButton) {
       const tickerToRemove = removeButton.dataset.removeTicker;
-      const symbols = getWatchlistSymbols();
-      if (!tickerToRemove || symbols.length <= 1) {
+      if (!tickerToRemove || state.watchlistSymbols.length <= 1) {
         return;
       }
 
-      setWatchlistSymbols(symbols.filter((ticker) => ticker !== tickerToRemove));
+      state.watchlistSymbols = state.watchlistSymbols.filter((ticker) => ticker !== tickerToRemove);
       persistWatchlistSymbols();
 
-      if (tickerToRemove === getSelectedTicker()) {
+      if (tickerToRemove === state.selectedTicker) {
         ensureSelectedTicker();
-        const prefs = getPrefs();
-        prefs.ticker = getSelectedTicker();
+        state.prefs.ticker = state.selectedTicker;
         persistPrefs();
         await refreshAll();
         return;
       }
 
-      await loadWatchlist();
+      renderWatchlistRows();
       return;
     }
 
     const button = (event.target as HTMLElement).closest("[data-ticker]") as HTMLButtonElement | null;
-    if (!button) {
-      return;
-    }
-
-    const ticker = button.dataset.ticker;
+    const ticker = button?.dataset.ticker;
     if (!ticker) {
       return;
     }
@@ -237,249 +252,95 @@ export function registerWatchlistEventHandlers(params: {
     await selectTickerAndRefresh(ticker);
   });
 
-  watchlistAddFormEl.addEventListener("submit", async (event) => {
+  els.watchlistAddFormEl.addEventListener("submit", (event) => {
     event.preventDefault();
 
-    const symbol = normalizeTicker(watchlistAddInputEl.value);
+    const symbol = normalizeTicker(els.watchlistAddInputEl.value);
     if (!symbol) {
       return;
     }
 
-    watchlistAddInputEl.value = "";
-    const symbols = getWatchlistSymbols();
-    if (!symbols.includes(symbol)) {
-      setWatchlistSymbols([symbol, ...symbols].slice(0, 60));
-      persistWatchlistSymbols();
-    }
+    els.watchlistAddInputEl.value = "";
+    hideSearchResults();
+    addSymbolToWatchlist(symbol);
+  });
 
-    await selectTickerAndRefresh(symbol);
+  setupSymbolSearch({
+    onPick: (picked) => {
+      const symbol = normalizeTicker(picked);
+      if (symbol) {
+        addSymbolToWatchlist(symbol);
+      }
+    },
   });
 }
 
-export async function bootstrapApp(params: {
-  startRefreshProgressLoop: () => void;
-  loadProviderStatus: () => Promise<void>;
-  initStore: () => Promise<void>;
-  ensureSelectedTicker: () => void;
-  watchlistListEl: HTMLDivElement;
-  getWatchlistSymbols: () => string[];
-  getSelectedTicker: () => string;
-  getLatestSparklinesByTicker: () => Map<string, number[]>;
-  getLatestSnapshotsByTicker: () => Map<string, SnapshotItem>;
-  restoreWindowLayout: () => Promise<void>;
-  initWindowLayoutPersistence: () => Promise<void>;
-  debugLog: (message: string, data?: unknown) => void;
-  renderControls: () => void;
-  setupSplitters: () => void;
-  onReorderWatchlist: (draggedTicker: string, targetTicker: string, placeAfter: boolean) => boolean;
-  onSelectTicker: (ticker: string) => Promise<void>;
-  setSuppressWatchlistClick: (value: boolean) => void;
-  attachLiveBarsListener: () => Promise<void>;
-  refreshAll: () => Promise<void>;
-  isApiCooldownActive: () => boolean;
-  loadWatchlist: () => Promise<void>;
-  loadSparklines: () => Promise<void>;
-  loadNews: () => Promise<void>;
-  scheduleAdaptiveBarsRefresh: () => void;
-}): Promise<void> {
-  const {
-    startRefreshProgressLoop,
-    loadProviderStatus,
-    initStore,
-    ensureSelectedTicker,
-    watchlistListEl,
-    getWatchlistSymbols,
-    getSelectedTicker,
-    getLatestSparklinesByTicker,
-    getLatestSnapshotsByTicker,
-    restoreWindowLayout,
-    initWindowLayoutPersistence,
-    debugLog,
-    renderControls,
-    setupSplitters,
-    onReorderWatchlist,
-    onSelectTicker,
-    setSuppressWatchlistClick,
-    attachLiveBarsListener,
-    refreshAll,
-    isApiCooldownActive,
-    loadWatchlist,
-    loadSparklines,
-    loadNews,
-    scheduleAdaptiveBarsRefresh,
-  } = params;
-
+export async function bootstrapApp(): Promise<void> {
   startRefreshProgressLoop();
   await loadProviderStatus();
-  await initStore();
+  await initPrefs();
   ensureSelectedTicker();
 
-  renderWatchlistRows(
-    watchlistListEl,
-    getWatchlistSymbols(),
-    getSelectedTicker(),
-    getLatestSparklinesByTicker(),
-  );
-
-  try {
-    await restoreWindowLayout();
-  } catch (error) {
-    debugLog("window:restore-exception", String(error));
-  }
-
-  try {
-    await initWindowLayoutPersistence();
-  } catch (error) {
-    debugLog("window:persistence-init-failed", String(error));
-  }
-
+  renderWatchlistRows();
+  applyStoredPaneSizes();
   renderControls();
   setupSplitters();
+
   setupWatchlistDragAndDrop({
-    watchlistListEl,
-    onReorder: onReorderWatchlist,
-    onSelectTicker,
-    onRenderRows: () => {
-      renderWatchlistRows(
-        watchlistListEl,
-        getWatchlistSymbols(),
-        getSelectedTicker(),
-        getLatestSparklinesByTicker(),
-        getLatestSnapshotsByTicker(),
-      );
+    watchlistListEl: els.watchlistListEl,
+    onReorder: (draggedTicker, targetTicker, placeAfter) => {
+      const next = reorderWatchlistSymbols(draggedTicker, targetTicker, placeAfter);
+      if (!next) {
+        return false;
+      }
+
+      state.watchlistSymbols = next;
+      persistWatchlistSymbols();
+      return true;
     },
-    setSuppressWatchlistClick,
+    onSelectTicker: selectTickerAndRefresh,
+    onRenderRows: renderWatchlistRows,
+    onBadgeClick: () => {
+      cycleWatchlistBadgeMode();
+      persistPrefs();
+      renderWatchlistRows();
+    },
+    setSuppressWatchlistClick: (value) => {
+      state.suppressWatchlistClick = value;
+    },
   });
 
   await attachLiveBarsListener();
   await refreshAll();
 
   window.setInterval(() => {
-    if (isApiCooldownActive()) {
-      return;
+    if (!isApiCooldownActive()) {
+      void loadWatchlist();
     }
-    void loadWatchlist();
-  }, 60_000);
+  }, WATCHLIST_REFRESH_MS);
 
   window.setInterval(() => {
-    if (isApiCooldownActive()) {
-      return;
+    if (!isApiCooldownActive()) {
+      void loadSparklines();
     }
-    void loadSparklines();
-  }, 300_000);
+  }, SPARKLINE_REFRESH_MS);
 
   window.setInterval(() => {
-    if (isApiCooldownActive()) {
-      return;
+    if (!isApiCooldownActive()) {
+      void loadNews();
     }
-    void loadNews();
-  }, 90_000);
+  }, NEWS_REFRESH_MS);
 
   scheduleAdaptiveBarsRefresh();
 }
 
-export function registerBeforeUnloadHandler(params: {
-  getVisibleRangeSaveTimer: () => number | null;
-  setVisibleRangeSaveTimer: (value: number | null) => void;
-  clearAdaptiveBarsRefresh: () => void;
-  disposeCharts: () => void;
-  getWindowLayoutSaveTimer: () => number | null;
-  setWindowLayoutSaveTimer: (value: number | null) => void;
-  getWindowLayoutPeriodicTimer: () => number | null;
-  setWindowLayoutPeriodicTimer: (value: number | null) => void;
-  captureWindowLayout: () => Promise<void>;
-  getUnlistenWindowMoved: () => (() => void) | null;
-  setUnlistenWindowMoved: (value: (() => void) | null) => void;
-  getUnlistenWindowResized: () => (() => void) | null;
-  setUnlistenWindowResized: (value: (() => void) | null) => void;
-  getUnlistenDomResize: () => (() => void) | null;
-  setUnlistenDomResize: (value: (() => void) | null) => void;
-  getRefreshProgressRaf: () => number | null;
-  setRefreshProgressRaf: (value: number | null) => void;
-  getUnlistenLiveBars: () => (() => void) | null;
-  setUnlistenLiveBars: (value: (() => void) | null) => void;
-  persistVisibleRangeForCurrentView: (range: { from: number; to: number } | null) => void;
-  getCurrentVisibleRange: () => { from: number; to: number } | null;
-}): void {
-  const {
-    getVisibleRangeSaveTimer,
-    setVisibleRangeSaveTimer,
-    clearAdaptiveBarsRefresh,
-    disposeCharts,
-    getWindowLayoutSaveTimer,
-    setWindowLayoutSaveTimer,
-    getWindowLayoutPeriodicTimer,
-    setWindowLayoutPeriodicTimer,
-    captureWindowLayout,
-    getUnlistenWindowMoved,
-    setUnlistenWindowMoved,
-    getUnlistenWindowResized,
-    setUnlistenWindowResized,
-    getUnlistenDomResize,
-    setUnlistenDomResize,
-    getRefreshProgressRaf,
-    setRefreshProgressRaf,
-    getUnlistenLiveBars,
-    setUnlistenLiveBars,
-    persistVisibleRangeForCurrentView,
-    getCurrentVisibleRange,
-  } = params;
-
+export function registerBeforeUnloadHandler(): void {
   window.addEventListener("beforeunload", () => {
-    const visibleRangeSaveTimer = getVisibleRangeSaveTimer();
-    if (visibleRangeSaveTimer !== null) {
-      window.clearTimeout(visibleRangeSaveTimer);
-      setVisibleRangeSaveTimer(null);
-    }
-    persistVisibleRangeForCurrentView(getCurrentVisibleRange());
-
-    const windowLayoutSaveTimer = getWindowLayoutSaveTimer();
-    if (windowLayoutSaveTimer !== null) {
-      window.clearTimeout(windowLayoutSaveTimer);
-      setWindowLayoutSaveTimer(null);
-    }
-
-    const windowLayoutPeriodicTimer = getWindowLayoutPeriodicTimer();
-    if (windowLayoutPeriodicTimer !== null) {
-      window.clearInterval(windowLayoutPeriodicTimer);
-      setWindowLayoutPeriodicTimer(null);
-    }
-
-    void captureWindowLayout();
-
-    const unlistenWindowMoved = getUnlistenWindowMoved();
-    if (unlistenWindowMoved) {
-      unlistenWindowMoved();
-      setUnlistenWindowMoved(null);
-    }
-
-    const unlistenWindowResized = getUnlistenWindowResized();
-    if (unlistenWindowResized) {
-      unlistenWindowResized();
-      setUnlistenWindowResized(null);
-    }
-
-    const unlistenDomResize = getUnlistenDomResize();
-    if (unlistenDomResize) {
-      unlistenDomResize();
-      setUnlistenDomResize(null);
-    }
-
-    const refreshProgressRaf = getRefreshProgressRaf();
-    if (refreshProgressRaf !== null) {
-      window.cancelAnimationFrame(refreshProgressRaf);
-      setRefreshProgressRaf(null);
-    }
-
+    flushVisibleRange(getVisibleLogicalRange());
+    stopRefreshProgressLoop();
     clearAdaptiveBarsRefresh();
     disposeCharts();
-
-    const unlistenLiveBars = getUnlistenLiveBars();
-    if (unlistenLiveBars) {
-      unlistenLiveBars();
-      setUnlistenLiveBars(null);
-    }
-
-    void invoke("stop_live_stream");
+    detachLiveBarsListener();
+    void api.stopLiveStream();
   });
 }

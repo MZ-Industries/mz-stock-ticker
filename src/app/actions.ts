@@ -1,23 +1,47 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import * as api from "./api";
+import { pushLiveBars, renderCharts } from "./chartPanel";
+import { els } from "./elements";
+import { getBarDateRange, selectOneDaySession } from "./market";
+import { trackRefreshScope } from "./progress";
+import { barsRefreshCadenceMs, loadProviderStatus, updateLagPill } from "./provider";
+import {
+  currentAggregationPreset,
+  debugLog,
+  enterApiCooldown,
+  isApiCooldownActive,
+  persistPrefs,
+  state,
+} from "./store";
+import { renderNewsItems, renderNewsMessage, renderStats, updateHeadline } from "./ui";
+import {
+  formatEt,
+  formatUtc,
+  getNyParts,
+  isPreMarketBar,
+  isRateLimitError,
+  isRegularMarketHour,
+  toNyIsoDate,
+} from "./utils";
 import { patchWatchlistRow, renderSparklineSvg, renderWatchlistRows } from "./watchlist";
-import { formatEt, formatUtc, isAfterHoursBar, isPreMarketBar, isRateLimitError, isRegularMarketHour, toNyIsoDate } from "./utils";
-import type { AggregateBar, LiveBarsEvent, NewsItem, RangePreset, SnapshotItem, SparklineItem } from "./types";
+import type { AggregateBar, LiveBarsEvent } from "./types";
 
-export async function fetchBarsAction(params: {
-  selectedTicker: string;
-  from: string;
-  to: string;
-  multiplier: number;
-  timespan: RangePreset["timespan"];
-}): Promise<AggregateBar[]> {
-  const { selectedTicker, from, to, multiplier, timespan } = params;
+let unlistenLiveBars: UnlistenFn | null = null;
+let barsRefreshTimer: number | null = null;
+
+async function fetchBars(
+  from: string,
+  to: string,
+  multiplier?: number,
+  timespan?: "minute" | "hour" | "day",
+): Promise<AggregateBar[]> {
+  const effective = currentAggregationPreset();
 
   try {
-    return await invoke<AggregateBar[]>("fetch_aggregates", {
-      ticker: selectedTicker,
-      multiplier,
-      timespan,
+    return await api.fetchAggregates({
+      ticker: state.selectedTicker,
+      multiplier: multiplier ?? effective.multiplier,
+      timespan: timespan ?? effective.timespan,
       from,
       to,
     });
@@ -29,33 +53,7 @@ export async function fetchBarsAction(params: {
   }
 }
 
-export async function loadWatchlistAction(params: {
-  isApiCooldownActive: () => boolean;
-  debugLog: (message: string, data?: unknown) => void;
-  watchlistSymbols: string[];
-  selectedTicker: string;
-  latestSparklinesByTicker: Map<string, number[]>;
-  trackRefreshScope: () => (success: boolean) => void;
-  enterApiCooldown: (error: unknown) => void;
-  updateLagPill: (referenceMs?: number) => void;
-  setLatestSnapshotsByTicker: (map: Map<string, SnapshotItem>) => void;
-  updateHeadline: () => void;
-  watchlistListEl: HTMLDivElement;
-}): Promise<void> {
-  const {
-    isApiCooldownActive,
-    debugLog,
-    watchlistSymbols,
-    selectedTicker,
-    latestSparklinesByTicker,
-    trackRefreshScope,
-    enterApiCooldown,
-    updateLagPill,
-    setLatestSnapshotsByTicker,
-    updateHeadline,
-    watchlistListEl,
-  } = params;
-
+export async function loadWatchlist(): Promise<void> {
   const endRefresh = trackRefreshScope();
   let success = false;
 
@@ -65,60 +63,23 @@ export async function loadWatchlistAction(params: {
       return;
     }
 
-    const snapshots = await invoke<SnapshotItem[]>("fetch_snapshots", {
-      tickers: watchlistSymbols,
-    });
-    const byTicker = new Map(snapshots.map((item) => [item.ticker, item]));
-    setLatestSnapshotsByTicker(byTicker);
-    updateLagPill(byTicker.get(selectedTicker)?.quote_timestamp_ms);
-    renderWatchlistRows(watchlistListEl, watchlistSymbols, selectedTicker, latestSparklinesByTicker, byTicker);
+    const snapshots = await api.fetchSnapshots(state.watchlistSymbols);
+    state.latestSnapshotsByTicker = new Map(snapshots.map((item) => [item.ticker, item]));
+    updateLagPill(state.latestSnapshotsByTicker.get(state.selectedTicker)?.quote_timestamp_ms);
+    renderWatchlistRows();
     updateHeadline();
     success = true;
   } catch (error) {
     if (isRateLimitError(error)) {
       enterApiCooldown(error);
     }
-    renderWatchlistRows(watchlistListEl, watchlistSymbols, selectedTicker, latestSparklinesByTicker);
+    renderWatchlistRows();
   } finally {
     endRefresh(success);
   }
 }
 
-export async function loadBarsAction(params: {
-  isApiCooldownActive: () => boolean;
-  debugLog: (message: string, data?: unknown) => void;
-  selectedTicker: string;
-  selectedRange: RangePreset;
-  effectiveAggregationPreset: () => { multiplier: number; timespan: "minute" | "hour" | "day" };
-  getBarDateRange: () => { from: string; to: string };
-  fetchBars: (from: string, to: string, multiplier?: number, timespan?: RangePreset["timespan"]) => Promise<AggregateBar[]>;
-  trackRefreshScope: () => (success: boolean) => void;
-  enterApiCooldown: (error: unknown) => void;
-  selectOneDaySession: (bars: AggregateBar[]) => { bars: AggregateBar[]; sessionDate: string | null };
-  setActiveSessionDate: (value: string | null) => void;
-  setLatestBars: (bars: AggregateBar[]) => void;
-  updateLagPill: (referenceMs?: number) => void;
-  renderCharts: () => void;
-  updateHeadline: () => void;
-}): Promise<void> {
-  const {
-    isApiCooldownActive,
-    debugLog,
-    selectedTicker,
-    selectedRange,
-    effectiveAggregationPreset,
-    getBarDateRange,
-    fetchBars,
-    trackRefreshScope,
-    enterApiCooldown,
-    selectOneDaySession,
-    setActiveSessionDate,
-    setLatestBars,
-    updateLagPill,
-    renderCharts,
-    updateHeadline,
-  } = params;
-
+export async function loadBars(): Promise<void> {
   const endRefresh = trackRefreshScope();
   let success = false;
 
@@ -128,11 +89,11 @@ export async function loadBarsAction(params: {
       return;
     }
 
-    const { from, to } = getBarDateRange();
-    const effective = effectiveAggregationPreset();
+    const { from, to } = getBarDateRange(state.selectedRange);
+    const effective = currentAggregationPreset();
     debugLog("loadBars:start", {
-      ticker: selectedTicker,
-      range: selectedRange.label,
+      ticker: state.selectedTicker,
+      range: state.selectedRange.label,
       multiplier: effective.multiplier,
       timespan: effective.timespan,
       from,
@@ -142,6 +103,14 @@ export async function loadBarsAction(params: {
     let bars: AggregateBar[] = [];
     try {
       bars = await fetchBars(from, to);
+
+      if (bars.length === 0) {
+        bars = await fetchBars(toNyIsoDate(14), toNyIsoDate(0));
+      }
+
+      if (bars.length === 0 && effective.timespan !== "day") {
+        bars = await fetchBars(toNyIsoDate(Math.max(state.selectedRange.days, 60)), toNyIsoDate(0), 1, "day");
+      }
     } catch (error) {
       if (isRateLimitError(error)) {
         enterApiCooldown(error);
@@ -151,73 +120,25 @@ export async function loadBarsAction(params: {
     }
 
     if (bars.length === 0) {
-      try {
-        bars = await fetchBars(toNyIsoDate(14), toNyIsoDate(0));
-      } catch (error) {
-        if (isRateLimitError(error)) {
-          enterApiCooldown(error);
-          return;
-        }
-        throw error;
-      }
-    }
-
-    if (bars.length === 0 && effective.timespan !== "day") {
-      try {
-        bars = await fetchBars(toNyIsoDate(Math.max(selectedRange.days, 60)), toNyIsoDate(0), 1, "day");
-      } catch (error) {
-        if (isRateLimitError(error)) {
-          enterApiCooldown(error);
-          return;
-        }
-        throw error;
-      }
-    }
-
-    if (bars.length === 0) {
       debugLog("loadBars:empty-after-fallbacks");
       return;
     }
 
-    const rawLast = bars[bars.length - 1]?.t;
-    if (rawLast) {
-      debugLog("loadBars:raw-last", {
-        count: bars.length,
-        lastEt: formatEt(rawLast),
-        lastUtc: formatUtc(rawLast),
-      });
-    }
-
-    if (selectedRange.label === "1D") {
+    if (state.selectedRange.label === "1D") {
       const session = selectOneDaySession(bars);
       bars = session.bars;
-      setActiveSessionDate(session.sessionDate);
-      const regularCount = bars.filter(isRegularMarketHour).length;
-      const afterHoursBars = bars.filter(isAfterHoursBar);
-      const afterHoursCount = afterHoursBars.length;
-      const afterHoursNonZeroVolume = afterHoursBars.filter((bar) => bar.v > 0).length;
-      const afterHoursVolumeSample = afterHoursBars.slice(-12).map((bar) => ({
-        et: formatEt(bar.t),
-        close: bar.c,
-        volume: bar.v,
-      }));
-      const afterHoursVolumeMax = afterHoursBars.reduce((max, bar) => Math.max(max, bar.v), 0);
+      state.activeSessionDate = session.sessionDate;
       debugLog("loadBars:1d-session", {
         sessionDate: session.sessionDate,
         count: bars.length,
-        regularCount,
-        afterHoursCount,
-        afterHoursNonZeroVolume,
-        afterHoursVolumeMax,
-        afterHoursVolumeSample,
         firstEt: bars[0] ? formatEt(bars[0].t) : null,
         lastEt: bars[bars.length - 1] ? formatEt(bars[bars.length - 1].t) : null,
       });
     } else {
-      setActiveSessionDate(null);
+      state.activeSessionDate = null;
     }
 
-    setLatestBars(bars);
+    state.latestBars = bars;
     updateLagPill(bars[bars.length - 1]?.t);
 
     renderCharts();
@@ -228,63 +149,91 @@ export async function loadBarsAction(params: {
   }
 }
 
-export async function loadNewsAction(params: {
-  selectedTicker: string;
-  isApiCooldownActive: () => boolean;
-  debugLog: (message: string, data?: unknown) => void;
-  trackRefreshScope: () => (success: boolean) => void;
-  enterApiCooldown: (error: unknown) => void;
-}): Promise<void> {
-  const {
-    selectedTicker,
-    isApiCooldownActive,
-    debugLog,
-    trackRefreshScope,
-    enterApiCooldown,
-  } = params;
-
+export async function loadNews(): Promise<void> {
   const endRefresh = trackRefreshScope();
   let success = false;
 
   try {
-    const newsGrid = document.querySelector("#news-grid") as HTMLDivElement;
     if (isApiCooldownActive()) {
       debugLog("news:skipped-cooldown");
-      newsGrid.innerHTML = `<p class="subtle">Cooling down after rate limit. Retrying shortly.</p>`;
+      if (!els.newsGridEl.querySelector(".news-card")) {
+        renderNewsMessage("Cooling down after rate limit. Retrying shortly.");
+      }
       return;
     }
 
-    const items = await invoke<NewsItem[]>("fetch_news", {
-      ticker: selectedTicker,
-      limit: 12,
-    });
-
-    newsGrid.innerHTML = items.map((item) => `
-      <article class="news-card">
-        <div>
-          <p class="subtle">${item.source || "News"}</p>
-          <h3>${item.title}</h3>
-          <p>${item.description || ""}</p>
-        </div>
-        <a href="${item.article_url}" target="_blank" rel="noreferrer">Read</a>
-      </article>
-    `).join("");
+    const items = await api.fetchNews(state.selectedTicker, 12);
+    renderNewsItems(items);
     success = true;
   } catch (error) {
-    const newsGrid = document.querySelector("#news-grid") as HTMLDivElement;
     if (isRateLimitError(error)) {
       enterApiCooldown(error);
-      newsGrid.innerHTML = `<p class="subtle">Rate limited by provider. Waiting before retry.</p>`;
+      if (!els.newsGridEl.querySelector(".news-card")) {
+        renderNewsMessage("Rate limited by provider. Waiting before retry.");
+      }
       return;
     }
-    newsGrid.innerHTML = `<p class="subtle">News is currently unavailable.</p>`;
+    renderNewsMessage("News is currently unavailable.");
   } finally {
     endRefresh(success);
   }
 }
 
+export async function loadSymbolDetail(): Promise<void> {
+  if (isApiCooldownActive()) {
+    debugLog("detail:skipped-cooldown");
+    return;
+  }
+
+  const ticker = state.selectedTicker;
+  try {
+    const detail = await api.fetchSymbolDetail(ticker);
+    if (ticker !== state.selectedTicker) {
+      return;
+    }
+
+    state.latestSymbolDetail = detail;
+    renderStats();
+    updateHeadline();
+    if (state.latestBars.length > 0) {
+      // Re-render so the previous-close reference line can pick up the detail.
+      renderCharts();
+    }
+  } catch (error) {
+    if (isRateLimitError(error)) {
+      enterApiCooldown(error);
+      return;
+    }
+    debugLog("detail:failed", String(error));
+  }
+}
+
+export async function loadSparklines(): Promise<void> {
+  try {
+    if (isApiCooldownActive()) {
+      return;
+    }
+
+    const items = await api.fetchSparklines(state.watchlistSymbols);
+    for (const item of items) {
+      state.latestSparklinesByTicker.set(item.ticker, item.prices);
+      const rowButton = els.watchlistListEl.querySelector(`[data-ticker="${item.ticker}"]`) as HTMLButtonElement | null;
+      if (rowButton) {
+        const sparklineEl = rowButton.querySelector(".watch-sparkline") as HTMLDivElement | null;
+        const snapshot = state.latestSnapshotsByTicker.get(item.ticker);
+        const isPositive = (snapshot?.change_percent ?? 0) >= 0;
+        if (sparklineEl && item.prices.length >= 2) {
+          sparklineEl.innerHTML = renderSparklineSvg(item.prices, isPositive);
+        }
+      }
+    }
+  } catch (error) {
+    debugLog("sparklines:failed", String(error));
+  }
+}
+
 /**
- * Splices the freshly polled tail of the series into `latestBars`.
+ * Splices the freshly polled tail of the series into `state.latestBars`.
  *
  * The backend polls the same interval the chart is drawing, so candles arrive
  * ready to use - no bucketing, no volume accounting. Yahoo keeps revising the
@@ -328,69 +277,42 @@ function spliceLiveBars(latestBars: AggregateBar[], incoming: AggregateBar[]): A
   return changed;
 }
 
-export function applyLiveBarsAction(params: {
-  event: LiveBarsEvent;
-  selectedTicker: string;
-  selectedRangeLabel: string;
-  activeSessionDate: string | null;
-  getSessionDate: (timestampMs: number) => string;
-  latestBars: AggregateBar[];
-  latestSnapshotsByTicker: Map<string, SnapshotItem>;
-  latestSparklinesByTicker: Map<string, number[]>;
-  watchlistListEl: HTMLDivElement;
-  debugLog: (message: string, data?: unknown) => void;
-  updateLagPill: (referenceMs?: number) => void;
-  updateHeadline: () => void;
-  pushBars: (bars: AggregateBar[]) => void;
-}): void {
-  const {
-    event,
-    selectedTicker,
-    selectedRangeLabel,
-    activeSessionDate,
-    getSessionDate,
-    latestBars,
-    latestSnapshotsByTicker,
-    latestSparklinesByTicker,
-    watchlistListEl,
-    debugLog,
-    updateLagPill,
-    updateHeadline,
-    pushBars,
-  } = params;
-
-  if (event.sym !== selectedTicker || event.bars.length === 0) {
+export function applyLiveBars(event: LiveBarsEvent): void {
+  if (event.sym !== state.selectedTicker || event.bars.length === 0) {
     return;
   }
 
   let incoming = event.bars.filter((bar) => bar.t > 0);
-  if (selectedRangeLabel === "1D" && activeSessionDate) {
-    incoming = incoming.filter((bar) => getSessionDate(bar.t) === activeSessionDate);
+  if (state.selectedRange.label === "1D" && state.activeSessionDate) {
+    incoming = incoming.filter((bar) => getNyParts(bar.t).date === state.activeSessionDate);
   }
 
-  const changed = spliceLiveBars(latestBars, incoming);
+  const changed = spliceLiveBars(state.latestBars, incoming);
   if (changed.length === 0) {
     return;
   }
 
-  const lastBar = latestBars[latestBars.length - 1];
-  const currentSnapshot = latestSnapshotsByTicker.get(event.sym);
+  const lastBar = state.latestBars[state.latestBars.length - 1];
+  const currentSnapshot = state.latestSnapshotsByTicker.get(event.sym);
   if (currentSnapshot) {
     const sessionClose = Number.isFinite(currentSnapshot.price) && currentSnapshot.price > 0
       ? currentSnapshot.price
       : Number.NaN;
 
     if (isRegularMarketHour(lastBar) || !Number.isFinite(sessionClose)) {
-      let previousClose = Number.NaN;
-      if (Number.isFinite(currentSnapshot.price) && Number.isFinite(currentSnapshot.change_percent)) {
+      let previousClose = Number.isFinite(currentSnapshot.previous_close)
+        ? (currentSnapshot.previous_close as number)
+        : Number.NaN;
+
+      if (!Number.isFinite(previousClose) && Number.isFinite(currentSnapshot.price) && Number.isFinite(currentSnapshot.change_percent)) {
         const denom = 100 + currentSnapshot.change_percent;
         if (Math.abs(denom) > Number.EPSILON) {
           previousClose = (currentSnapshot.price * 100) / denom;
         }
       }
 
-      if ((!Number.isFinite(previousClose) || Math.abs(previousClose) <= Number.EPSILON) && latestBars.length >= 1) {
-        previousClose = latestBars[0].o;
+      if ((!Number.isFinite(previousClose) || Math.abs(previousClose) <= Number.EPSILON) && state.latestBars.length >= 1) {
+        previousClose = state.latestBars[0].o;
       }
 
       let liveChangePercent = currentSnapshot.change_percent;
@@ -398,7 +320,7 @@ export function applyLiveBarsAction(params: {
         liveChangePercent = ((lastBar.c - previousClose) / previousClose) * 100;
       }
 
-      latestSnapshotsByTicker.set(event.sym, {
+      state.latestSnapshotsByTicker.set(event.sym, {
         ...currentSnapshot,
         price: lastBar.c,
         change_percent: liveChangePercent,
@@ -414,14 +336,14 @@ export function applyLiveBarsAction(params: {
         ? { pre_market_price: lastBar.c, pre_market_change_percent: changeFromClose }
         : { post_market_price: lastBar.c, post_market_change_percent: changeFromClose };
 
-      latestSnapshotsByTicker.set(event.sym, {
+      state.latestSnapshotsByTicker.set(event.sym, {
         ...currentSnapshot,
         ...extended,
         quote_timestamp_ms: lastBar.t,
       });
     }
 
-    patchWatchlistRow(watchlistListEl, event.sym, latestSnapshotsByTicker, latestSparklinesByTicker);
+    patchWatchlistRow(event.sym);
   }
 
   debugLog("stream:bars-applied", {
@@ -435,140 +357,76 @@ export function applyLiveBarsAction(params: {
 
   updateLagPill(lastBar.t);
   // lightweight-charts follows real time on its own when the last bar is visible.
-  pushBars(changed);
+  pushLiveBars(changed);
   updateHeadline();
 }
 
-export async function startStreamAction(params: {
-  isApiCooldownActive: () => boolean;
-  debugLog: (message: string, data?: unknown) => void;
-  selectedTicker: string;
-  effectiveAggregationPreset: () => { multiplier: number; timespan: "minute" | "hour" | "day" };
-  loadProviderStatus: () => Promise<void>;
-}): Promise<void> {
-  const {
-    isApiCooldownActive,
-    debugLog,
-    selectedTicker,
-    effectiveAggregationPreset,
-    loadProviderStatus,
-  } = params;
+export async function attachLiveBarsListener(): Promise<void> {
+  if (unlistenLiveBars) {
+    return;
+  }
 
+  unlistenLiveBars = await api.listenLiveBars(applyLiveBars);
+}
+
+export function detachLiveBarsListener(): void {
+  if (unlistenLiveBars) {
+    unlistenLiveBars();
+    unlistenLiveBars = null;
+  }
+}
+
+export async function startStream(): Promise<void> {
   if (isApiCooldownActive()) {
     debugLog("stream:start-skipped-cooldown");
     return;
   }
 
-  const { multiplier, timespan } = effectiveAggregationPreset();
-  debugLog("stream:start", { ticker: selectedTicker, multiplier, timespan });
-  await invoke("start_live_stream", { ticker: selectedTicker, multiplier, timespan });
+  const { multiplier, timespan } = currentAggregationPreset();
+  debugLog("stream:start", { ticker: state.selectedTicker, multiplier, timespan });
+  await api.startLiveStream({ ticker: state.selectedTicker, multiplier, timespan });
   await loadProviderStatus();
+  scheduleAdaptiveBarsRefresh();
 }
 
-export async function attachLiveBarsListenerAction(params: {
-  unlistenLiveBars: (() => void) | null;
-  setUnlistenLiveBars: (value: (() => void) | null) => void;
-  applyLiveBars: (event: LiveBarsEvent) => void;
-}): Promise<void> {
-  const { unlistenLiveBars, setUnlistenLiveBars, applyLiveBars } = params;
-
-  if (unlistenLiveBars) {
-    return;
-  }
-
-  const unlisten = await listen<LiveBarsEvent>("live-bars", (event) => {
-    applyLiveBars(event.payload);
-  });
-  setUnlistenLiveBars(unlisten);
-}
-
-export async function loadSparklinesAction(params: {
-  isApiCooldownActive: () => boolean;
-  watchlistSymbols: string[];
-  latestSparklinesByTicker: Map<string, number[]>;
-  latestSnapshotsByTicker: Map<string, SnapshotItem>;
-  watchlistListEl: HTMLDivElement;
-  debugLog: (message: string, data?: unknown) => void;
-}): Promise<void> {
-  const {
-    isApiCooldownActive,
-    watchlistSymbols,
-    latestSparklinesByTicker,
-    latestSnapshotsByTicker,
-    watchlistListEl,
-    debugLog,
-  } = params;
-
-  try {
-    if (isApiCooldownActive()) {
-      return;
-    }
-    const items = await invoke<SparklineItem[]>("fetch_sparklines", {
-      tickers: watchlistSymbols,
-    });
-    for (const item of items) {
-      latestSparklinesByTicker.set(item.ticker, item.prices);
-      const rowButton = watchlistListEl.querySelector(`[data-ticker="${item.ticker}"]`) as HTMLButtonElement | null;
-      if (rowButton) {
-        const sparklineEl = rowButton.querySelector(".watch-sparkline") as HTMLDivElement | null;
-        const snapshot = latestSnapshotsByTicker.get(item.ticker);
-        const isPositive = (snapshot?.change_percent ?? 0) >= 0;
-        if (sparklineEl && item.prices.length >= 2) {
-          sparklineEl.innerHTML = renderSparklineSvg(item.prices, isPositive);
-        }
-      }
-    }
-  } catch (error) {
-    debugLog("sparklines:failed", String(error));
-  }
-}
-
-export async function refreshAllAction(params: {
-  isApiCooldownActive: () => boolean;
-  debugLog: (message: string, data?: unknown) => void;
-  loadWatchlist: () => Promise<void>;
-  loadBars: () => Promise<void>;
-  loadNews: () => Promise<void>;
-  loadSparklines: () => Promise<void>;
-  startStream: () => Promise<void>;
-}): Promise<void> {
-  const {
-    isApiCooldownActive,
-    debugLog,
-    loadWatchlist,
-    loadBars,
-    loadNews,
-    loadSparklines,
-    startStream,
-  } = params;
-
+export async function refreshAll(): Promise<void> {
   if (isApiCooldownActive()) {
     debugLog("refreshAll:skipped-cooldown");
     return;
   }
 
-  await Promise.all([loadWatchlist(), loadBars(), loadNews()]);
+  await Promise.all([loadWatchlist(), loadBars(), loadNews(), loadSymbolDetail()]);
   void loadSparklines();
   await startStream();
 }
 
-export async function selectTickerAndRefreshAction(params: {
-  ticker: string;
-  setSelectedTicker: (ticker: string) => void;
-  setPrefsTicker: (ticker: string) => void;
-  persistPrefs: () => void;
-  refreshAll: () => Promise<void>;
-}): Promise<void> {
-  const {
-    ticker,
-    setSelectedTicker,
-    setPrefsTicker,
-    persistPrefs,
-    refreshAll,
-  } = params;
-
-  setSelectedTicker(ticker);
-  setPrefsTicker(ticker);
+export async function selectTickerAndRefresh(ticker: string): Promise<void> {
+  state.selectedTicker = ticker;
+  state.prefs.ticker = ticker;
   persistPrefs();
+  renderStats();
   await refreshAll();
+}
+
+export function clearAdaptiveBarsRefresh(): void {
+  if (barsRefreshTimer !== null) {
+    window.clearTimeout(barsRefreshTimer);
+    barsRefreshTimer = null;
+  }
+}
+
+/**
+ * Periodic full refetch that repairs history (splits, late volume). The live
+ * poller keeps the trailing candle current, so this can afford to be lazy.
+ */
+export function scheduleAdaptiveBarsRefresh(): void {
+  clearAdaptiveBarsRefresh();
+
+  barsRefreshTimer = window.setTimeout(async () => {
+    barsRefreshTimer = null;
+    if (!isApiCooldownActive()) {
+      await Promise.allSettled([loadBars(), loadWatchlist()]);
+    }
+    scheduleAdaptiveBarsRefresh();
+  }, barsRefreshCadenceMs());
 }

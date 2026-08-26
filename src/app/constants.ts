@@ -16,8 +16,8 @@ export const DEFAULT_WATCHLIST = [
 ];
 
 export const WATCHLIST_STORAGE_KEY = "watchlistSymbols";
-export const WINDOW_LAYOUT_STORAGE_KEY = "windowLayoutV1";
 export const MAX_STORED_VISIBLE_RANGES = 120;
+export const MAX_WATCHLIST_SYMBOLS = 60;
 
 export const RANGES: RangePreset[] = [
   { label: "1D", days: 1, multiplier: 1, timespan: "minute" },
@@ -25,8 +25,11 @@ export const RANGES: RangePreset[] = [
   { label: "1M", days: 30, multiplier: 30, timespan: "minute" },
   { label: "3M", days: 90, multiplier: 1, timespan: "hour" },
   { label: "6M", days: 180, multiplier: 4, timespan: "hour" },
+  // Days for YTD are an upper bound; the actual window starts at Jan 1 (see getBarDateRange).
+  { label: "YTD", days: 365, multiplier: 1, timespan: "day" },
   { label: "1Y", days: 365, multiplier: 1, timespan: "day" },
-  { label: "ALL", days: 1800, multiplier: 1, timespan: "day" },
+  { label: "5Y", days: 1825, multiplier: 1, timespan: "day" },
+  { label: "ALL", days: 7300, multiplier: 1, timespan: "day" },
 ];
 
 export const CANDLE_INTERVAL_OPTIONS: CandleIntervalOption[] = [
@@ -44,14 +47,18 @@ export const MOVING_AVERAGE_PERIOD_OPTIONS = [20, 50, 200] as const;
 
 export const RIGHT_SCALE_WIDTH_PX = 72;
 export const AUTO_REFRESH_PROGRESS_WINDOW_MS = 60_000;
-export const WINDOW_LAYOUT_SAVE_DEBOUNCE_MS = 800;
-export const WINDOW_LAYOUT_PERIODIC_SAVE_MS = 15_000;
-export const USE_NATIVE_WINDOW_STATE = true;
 export const MIN_PRICE_PANE_RATIO = 0.4;
 export const MAX_PRICE_PANE_RATIO = 0.9;
 export const MIN_CHART_AREA_RATIO = 0.35;
 export const MAX_CHART_AREA_RATIO = 0.85;
 export const BARS_REFRESH_BASELINE_MS = 300_000;
+
+export const WATCHLIST_REFRESH_MS = 60_000;
+export const SPARKLINE_REFRESH_MS = 300_000;
+// News rarely changes minute to minute, and every request counts against
+// Yahoo's shared per-IP budget.
+export const NEWS_REFRESH_MS = 300_000;
+export const SEARCH_DEBOUNCE_MS = 250;
 
 export const defaultPrefs: AppPrefs = {
   ticker: "AAPL",

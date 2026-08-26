@@ -182,6 +182,11 @@ export function getBarDateRange(selectedRange: RangePreset): { from: string; to:
     return { from: toNyIsoDate(4), to: toNyIsoDate(0) };
   }
 
+  if (selectedRange.label === "YTD") {
+    const nyToday = getNyParts(Date.now()).date;
+    return { from: `${nyToday.slice(0, 4)}-01-01`, to: toNyIsoDate(0) };
+  }
+
   return {
     from: toNyIsoDate(selectedRange.days),
     to: toNyIsoDate(0),

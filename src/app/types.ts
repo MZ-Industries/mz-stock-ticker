@@ -19,6 +19,7 @@ export type SnapshotItem = {
   ticker: string;
   price: number;
   change_percent: number;
+  previous_close?: number;
   quote_timestamp_ms?: number;
   pre_market_price?: number;
   pre_market_change_percent?: number;
@@ -41,6 +42,34 @@ export type NewsItem = {
   article_url: string;
   image_url: string;
   description: string;
+};
+
+/** Per-symbol stats for the detail header and stats strip. */
+export type SymbolDetail = {
+  ticker: string;
+  name?: string;
+  exchange?: string;
+  currency?: string;
+  market_state?: string;
+  open?: number;
+  day_high?: number;
+  day_low?: number;
+  previous_close?: number;
+  volume?: number;
+  average_volume_3m?: number;
+  fifty_two_week_high?: number;
+  fifty_two_week_low?: number;
+  market_cap?: number;
+  trailing_pe?: number;
+  eps_ttm?: number;
+  dividend_yield_percent?: number;
+};
+
+export type SearchResult = {
+  symbol: string;
+  name: string;
+  exchange: string;
+  quote_type: string;
 };
 
 export type ProviderStatus = {
@@ -70,15 +99,9 @@ export type AppPrefs = {
   candleIntervalKey?: string;
   movingAveragePeriods?: number[];
   watchlistSymbols?: string[];
+  watchlistBadgeMode?: "percent" | "delta";
   visibleRangesByViewKey?: Record<string, { from: number; to: number }>;
   sidebarWidth: number;
   pricePaneHeight: number;
   chartAreaHeight: number;
-  windowLayout?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    maximized: boolean;
-  };
 };

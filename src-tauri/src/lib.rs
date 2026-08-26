@@ -45,10 +45,20 @@ struct YahooChartResult {
 struct YahooChartMeta {
     regular_market_price: Option<f64>,
     previous_close: Option<f64>,
+    chart_previous_close: Option<f64>,
     pre_market_price: Option<f64>,
     pre_market_change_percent: Option<f64>,
     post_market_price: Option<f64>,
     post_market_change_percent: Option<f64>,
+    regular_market_day_high: Option<f64>,
+    regular_market_day_low: Option<f64>,
+    regular_market_volume: Option<f64>,
+    fifty_two_week_high: Option<f64>,
+    fifty_two_week_low: Option<f64>,
+    long_name: Option<String>,
+    short_name: Option<String>,
+    currency: Option<String>,
+    full_exchange_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,11 +104,28 @@ struct YahooQuoteItem {
     regular_market_time: Option<i64>,
     regular_market_previous_close: Option<f64>,
     regular_market_change_percent: Option<f64>,
+    regular_market_open: Option<f64>,
+    regular_market_day_high: Option<f64>,
+    regular_market_day_low: Option<f64>,
+    regular_market_volume: Option<f64>,
+    average_daily_volume_3_month: Option<f64>,
+    fifty_two_week_high: Option<f64>,
+    fifty_two_week_low: Option<f64>,
+    market_cap: Option<f64>,
+    #[serde(rename = "trailingPE")]
+    trailing_pe: Option<f64>,
+    eps_trailing_twelve_months: Option<f64>,
+    /// Already a percentage (e.g. 0.35 means 0.35%), unlike trailingAnnualDividendYield.
+    dividend_yield: Option<f64>,
+    market_state: Option<String>,
+    currency: Option<String>,
+    full_exchange_name: Option<String>,
     pre_market_price: Option<f64>,
     pre_market_change_percent: Option<f64>,
     post_market_price: Option<f64>,
     post_market_change_percent: Option<f64>,
     short_name: Option<String>,
+    long_name: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -106,12 +133,77 @@ struct SnapshotItem {
     ticker: String,
     price: f64,
     change_percent: f64,
+    previous_close: Option<f64>,
     quote_timestamp_ms: Option<i64>,
     pre_market_price: Option<f64>,
     pre_market_change_percent: Option<f64>,
     post_market_price: Option<f64>,
     post_market_change_percent: Option<f64>,
     name: Option<String>,
+}
+
+impl SnapshotItem {
+    fn empty(ticker: &str) -> Self {
+        SnapshotItem {
+            ticker: ticker.to_string(),
+            price: 0.0,
+            change_percent: 0.0,
+            previous_close: None,
+            quote_timestamp_ms: None,
+            pre_market_price: None,
+            pre_market_change_percent: None,
+            post_market_price: None,
+            post_market_change_percent: None,
+            name: None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct SymbolDetail {
+    ticker: String,
+    name: Option<String>,
+    exchange: Option<String>,
+    currency: Option<String>,
+    market_state: Option<String>,
+    open: Option<f64>,
+    day_high: Option<f64>,
+    day_low: Option<f64>,
+    previous_close: Option<f64>,
+    volume: Option<f64>,
+    average_volume_3m: Option<f64>,
+    fifty_two_week_high: Option<f64>,
+    fifty_two_week_low: Option<f64>,
+    market_cap: Option<f64>,
+    trailing_pe: Option<f64>,
+    eps_ttm: Option<f64>,
+    dividend_yield_percent: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooSearchQuotesResponse {
+    quotes: Option<Vec<YahooSearchQuote>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct YahooSearchQuote {
+    symbol: Option<String>,
+    shortname: Option<String>,
+    longname: Option<String>,
+    exch_disp: Option<String>,
+    exchange: Option<String>,
+    quote_type: Option<String>,
+    type_disp: Option<String>,
+    is_yahoo_finance: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+struct SearchResult {
+    symbol: String,
+    name: String,
+    exchange: String,
+    quote_type: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -160,11 +252,17 @@ struct StreamState {
 }
 
 type SnapshotCache = Mutex<HashMap<String, (SnapshotItem, Instant)>>;
+type DetailCache = Mutex<HashMap<String, (SymbolDetail, Instant)>>;
 
 static SNAPSHOT_CACHE: OnceLock<SnapshotCache> = OnceLock::new();
+static DETAIL_CACHE: OnceLock<DetailCache> = OnceLock::new();
 static YAHOO_CLIENT: OnceLock<Client> = OnceLock::new();
+/// Cached crumb for the v7 quote endpoint; None until first acquired,
+/// invalidated whenever Yahoo answers 401/403.
+static YAHOO_CRUMB: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 const SNAPSHOT_CACHE_TTL: Duration = Duration::from_secs(90);
+const DETAIL_CACHE_TTL: Duration = Duration::from_secs(60);
 // Yahoo's chart endpoint rate-limits well before you would like it to, and a 429
 // there also starves the aggregate/quote calls that share the same host.
 const LIVE_POLL_ACTIVE: Duration = Duration::from_secs(15);
@@ -206,6 +304,8 @@ pub fn run() {
             fetch_snapshots,
             fetch_sparklines,
             fetch_news,
+            fetch_symbol_detail,
+            search_symbols,
             start_live_stream,
             stop_live_stream
         ])

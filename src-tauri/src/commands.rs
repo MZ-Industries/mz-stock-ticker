@@ -213,6 +213,64 @@ pub async fn fetch_sparklines(tickers: Vec<String>) -> Result<Vec<SparklineItem>
     Ok(items)
 }
 
+/// Requests the batch quote endpoint with crumb auth. `Ok(None)` means the
+/// endpoint is unusable (auth or HTTP failure) and the caller should fall back
+/// to per-ticker chart metadata.
+async fn request_quotes(symbols: &str) -> Result<Option<Vec<YahooQuoteItem>>, String> {
+    let client = yahoo_client()?;
+    let mut attempted_refresh = false;
+
+    loop {
+        let crumb = match acquire_crumb().await {
+            Ok(value) => Some(value),
+            Err(err) if err.starts_with("RATE_LIMITED") => return Err(err),
+            Err(err) => {
+                debug_log(&format!("quote:crumb-unavailable {}", err));
+                None
+            }
+        };
+
+        let mut url = Url::parse(&format!("{}/v7/finance/quote", yahoo_base_url()))
+            .map_err(|err| format!("Bad Yahoo quote URL: {}", err))?;
+        url.query_pairs_mut().append_pair("symbols", symbols);
+        if let Some(crumb) = &crumb {
+            url.query_pairs_mut().append_pair("crumb", crumb);
+        }
+
+        let response = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|err| format!("Network error: {}", err))?;
+
+        let status = response.status();
+        debug_log(&format!("quote:status {}", status));
+
+        if status.as_u16() == 429 {
+            return Err(rate_limit_error("quote", &response));
+        }
+
+        if matches!(status.as_u16(), 401 | 403) && !attempted_refresh {
+            // Crumbs expire with their cookie; mint a fresh pair and retry once.
+            attempted_refresh = true;
+            invalidate_crumb();
+            debug_log("quote:auth-retry");
+            continue;
+        }
+
+        if !status.is_success() {
+            return Ok(None);
+        }
+
+        let payload = response
+            .json::<YahooQuoteResponse>()
+            .await
+            .map_err(|err| format!("Failed to parse Yahoo quote response: {}", err))?;
+
+        return Ok(Some(payload.quote_response.result.unwrap_or_default()));
+    }
+}
+
 #[tauri::command]
 pub async fn fetch_snapshots(tickers: Vec<String>) -> Result<Vec<SnapshotItem>, String> {
     if tickers.is_empty() {
@@ -239,96 +297,69 @@ pub async fn fetch_snapshots(tickers: Vec<String>) -> Result<Vec<SnapshotItem>, 
 
     if !missing.is_empty() {
         let symbols = missing.join(",");
-        let mut url = Url::parse(&format!("{}/v7/finance/quote", yahoo_base_url()))
-            .map_err(|err| format!("Bad Yahoo quote URL: {}", err))?;
-        url.query_pairs_mut().append_pair("symbols", &symbols);
-
         debug_log(&format!("quote:req symbols={} count={}", symbols, missing.len()));
 
-        let client = yahoo_client()?;
-        let response = client
-            .get(url)
-            .send()
-            .await
-            .map_err(|err| format!("Network error: {}", err))?;
+        match request_quotes(&symbols).await? {
+            Some(items) => {
+                let mut by_symbol: HashMap<String, YahooQuoteItem> = HashMap::new();
+                for item in items {
+                    by_symbol.insert(item.symbol.to_uppercase(), item);
+                }
 
-        debug_log(&format!("quote:status {}", response.status()));
-
-        if response.status().as_u16() == 429 {
-            return Err(rate_limit_error("quote", &response));
-        }
-
-        if response.status().is_success() {
-            let payload = response
-                .json::<YahooQuoteResponse>()
-                .await
-                .map_err(|err| format!("Failed to parse Yahoo quote response: {}", err))?;
-
-            let mut by_symbol: HashMap<String, YahooQuoteItem> = HashMap::new();
-            for item in payload.quote_response.result.unwrap_or_default() {
-                by_symbol.insert(item.symbol.to_uppercase(), item);
-            }
-
-            for ticker in missing {
-                if let Some(item) = by_symbol.get(&ticker) {
-                    let price = item.regular_market_price.unwrap_or(0.0);
-                    let change_percent = if let Some(cp) = item.regular_market_change_percent {
-                        cp
-                    } else if let Some(prev_close) = item.regular_market_previous_close {
-                        if prev_close.abs() > f64::EPSILON {
-                            ((price - prev_close) / prev_close) * 100.0
+                for ticker in missing {
+                    if let Some(item) = by_symbol.get(&ticker) {
+                        let price = item.regular_market_price.unwrap_or(0.0);
+                        let change_percent = if let Some(cp) = item.regular_market_change_percent {
+                            cp
+                        } else if let Some(prev_close) = item.regular_market_previous_close {
+                            if prev_close.abs() > f64::EPSILON {
+                                ((price - prev_close) / prev_close) * 100.0
+                            } else {
+                                0.0
+                            }
                         } else {
                             0.0
-                        }
+                        };
+
+                        let snapshot = SnapshotItem {
+                            ticker: ticker.clone(),
+                            price,
+                            change_percent,
+                            previous_close: item.regular_market_previous_close,
+                            quote_timestamp_ms: item.regular_market_time.map(|t| t * 1000),
+                            pre_market_price: item.pre_market_price,
+                            pre_market_change_percent: item.pre_market_change_percent,
+                            post_market_price: item.post_market_price,
+                            post_market_change_percent: item.post_market_change_percent,
+                            name: item.short_name.clone().or_else(|| item.long_name.clone()),
+                        };
+
+                        put_cached_snapshot(snapshot.clone());
+                        mapped.push(snapshot);
+                    } else if let Some(stale) = get_any_cached_snapshot(&ticker) {
+                        mapped.push(stale);
                     } else {
-                        0.0
-                    };
-
-                    let snapshot = SnapshotItem {
-                        ticker: ticker.clone(),
-                        price,
-                        change_percent,
-                        quote_timestamp_ms: item.regular_market_time.map(|t| t * 1000),
-                        pre_market_price: item.pre_market_price,
-                        pre_market_change_percent: item.pre_market_change_percent,
-                        post_market_price: item.post_market_price,
-                        post_market_change_percent: item.post_market_change_percent,
-                        name: item.short_name.clone(),
-                    };
-
-                    put_cached_snapshot(snapshot.clone());
-                    mapped.push(snapshot);
-                } else if let Some(stale) = get_any_cached_snapshot(&ticker) {
-                    mapped.push(stale);
-                } else {
-                    mapped.push(SnapshotItem {
-                        ticker,
-                        price: 0.0,
-                        change_percent: 0.0,
-                        quote_timestamp_ms: None,
-                        pre_market_price: None,
-                        pre_market_change_percent: None,
-                        post_market_price: None,
-                        post_market_change_percent: None,
-                        name: None,
-                    });
-                }
-            }
-        } else {
-            debug_log("quote:fallback=chart");
-            for ticker in missing {
-                let mut snapshot = fetch_snapshot_from_chart(client, &ticker).await;
-                if snapshot.price <= 0.0 {
-                    if let Some(stale) = get_any_cached_snapshot(&ticker) {
-                        debug_log(&format!("quote:error-using-cache ticker={}", ticker));
-                        snapshot = stale;
+                        mapped.push(SnapshotItem::empty(&ticker));
                     }
                 }
+            }
+            None => {
+                debug_log("quote:fallback=chart");
+                let client = yahoo_client()?;
+                for ticker in missing {
+                    let mut snapshot = fetch_snapshot_from_chart(client, &ticker).await;
+                    if snapshot.price <= 0.0 {
+                        if let Some(stale) = get_any_cached_snapshot(&ticker) {
+                            debug_log(&format!("quote:error-using-cache ticker={}", ticker));
+                            snapshot = stale;
+                        }
+                    }
 
-                if snapshot.price > 0.0 {
-                    put_cached_snapshot(snapshot.clone());
+                    if snapshot.price > 0.0 {
+                        put_cached_snapshot(snapshot.clone());
+                    }
+                    mapped.push(snapshot);
                 }
-                mapped.push(snapshot);
             }
         }
     }
@@ -359,6 +390,117 @@ pub async fn fetch_snapshots(tickers: Vec<String>) -> Result<Vec<SnapshotItem>, 
     });
 
     Ok(mapped)
+}
+
+#[tauri::command]
+pub async fn fetch_symbol_detail(ticker: String) -> Result<SymbolDetail, String> {
+    let ticker = sanitize_ticker(&ticker)?;
+
+    if let Some(cached) = get_cached_detail(&ticker) {
+        debug_log(&format!("detail:cache-hit ticker={}", ticker));
+        return Ok(cached);
+    }
+
+    // The quote endpoint has the full stat set; chart meta is the degraded fallback.
+    if let Some(items) = request_quotes(&ticker).await? {
+        if let Some(item) = items
+            .into_iter()
+            .find(|item| item.symbol.eq_ignore_ascii_case(&ticker))
+        {
+            let detail = SymbolDetail {
+                ticker: ticker.clone(),
+                name: item.long_name.or(item.short_name),
+                exchange: item.full_exchange_name,
+                currency: item.currency,
+                market_state: item.market_state,
+                open: item.regular_market_open,
+                day_high: item.regular_market_day_high,
+                day_low: item.regular_market_day_low,
+                previous_close: item.regular_market_previous_close,
+                volume: item.regular_market_volume,
+                average_volume_3m: item.average_daily_volume_3_month,
+                fifty_two_week_high: item.fifty_two_week_high,
+                fifty_two_week_low: item.fifty_two_week_low,
+                market_cap: item.market_cap,
+                trailing_pe: item.trailing_pe,
+                eps_ttm: item.eps_trailing_twelve_months,
+                dividend_yield_percent: item.dividend_yield,
+            };
+
+            put_cached_detail(detail.clone());
+            return Ok(detail);
+        }
+    }
+
+    debug_log(&format!("detail:fallback=chart ticker={}", ticker));
+    let client = yahoo_client()?;
+    let detail = fetch_detail_from_chart(client, &ticker).await;
+    put_cached_detail(detail.clone());
+    Ok(detail)
+}
+
+#[tauri::command]
+pub async fn search_symbols(query: String) -> Result<Vec<SearchResult>, String> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let safe_query: String = trimmed.chars().take(40).collect();
+    let mut url = Url::parse(&format!("{}/v1/finance/search", yahoo_news_base_url()))
+        .map_err(|err| format!("Bad Yahoo search URL: {}", err))?;
+    url.query_pairs_mut()
+        .append_pair("q", &safe_query)
+        .append_pair("quotesCount", "8")
+        .append_pair("newsCount", "0")
+        .append_pair("enableFuzzyQuery", "false");
+
+    debug_log(&format!("search:req q={}", safe_query));
+
+    let client = yahoo_client()?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|err| format!("Network error: {}", err))?;
+
+    if response.status().as_u16() == 429 {
+        return Err(rate_limit_error("search", &response));
+    }
+
+    if !response.status().is_success() {
+        return Err(format!("Yahoo search API error: HTTP {}", response.status()));
+    }
+
+    let payload = response
+        .json::<YahooSearchQuotesResponse>()
+        .await
+        .map_err(|err| format!("Failed to parse Yahoo search response: {}", err))?;
+
+    let results = payload
+        .quotes
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|quote| quote.is_yahoo_finance != Some(false))
+        .filter_map(|quote| {
+            let symbol = quote.symbol?;
+            if symbol.is_empty() {
+                return None;
+            }
+
+            Some(SearchResult {
+                name: quote
+                    .longname
+                    .or(quote.shortname)
+                    .unwrap_or_else(|| symbol.clone()),
+                exchange: quote.exch_disp.or(quote.exchange).unwrap_or_default(),
+                quote_type: quote.type_disp.or(quote.quote_type).unwrap_or_default(),
+                symbol,
+            })
+        })
+        .collect();
+
+    Ok(results)
 }
 
 #[tauri::command]

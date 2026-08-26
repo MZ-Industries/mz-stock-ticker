@@ -5,16 +5,19 @@ import {
   CandlestickSeries,
   HistogramSeries,
   LineSeries,
+  LineStyle,
   createChart,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type LineWidth,
+  type MouseEventParams,
   type SeriesType,
   type TickMarkType,
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { formatAxisTime, formatTooltipTime } from "./utils";
+import { fmtCompact, fmtNumber, formatAxisTime, formatTooltipTime } from "./utils";
 import type { AggregateBar, ChartType, RangePreset } from "./types";
 
 export type VisibleRange = { from: number; to: number };
@@ -43,6 +46,8 @@ export type ChartRenderRequest = {
   chartType: ChartType;
   timespan: RangePreset["timespan"];
   movingAveragePeriods: number[];
+  /** Official previous close; drawn as a dashed reference line when set. */
+  previousClose: number | null;
   /** Key the saved visible range is stored under (ticker + range preset). */
   viewKey: string;
   /**
@@ -181,6 +186,70 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   let resetKey: string | null = null;
   let newestSeriesTime: UTCTimestamp | null = null;
   let shadingFrame: number | null = null;
+  let previousClose: number | null = null;
+  let previousCloseLine: IPriceLine | null = null;
+  let legendEl: HTMLDivElement | null = null;
+
+  const renderLegend = (index: number): void => {
+    if (!legendEl) {
+      return;
+    }
+
+    const bar = bars[index];
+    if (!bar) {
+      legendEl.innerHTML = "";
+      return;
+    }
+
+    const base = index > 0 ? bars[index - 1].c : bar.o;
+    const pct = Math.abs(base) > Number.EPSILON ? ((bar.c - base) / base) * 100 : 0;
+    const cls = bar.c >= base ? "up" : "down";
+    const showOhlc = usesOhlcData(chartType);
+
+    legendEl.innerHTML = showOhlc
+      ? `<span>O <b>${fmtNumber(bar.o)}</b></span>`
+        + `<span>H <b>${fmtNumber(bar.h)}</b></span>`
+        + `<span>L <b>${fmtNumber(bar.l)}</b></span>`
+        + `<span>C <b class="${cls}">${fmtNumber(bar.c)}</b></span>`
+        + `<span class="${cls}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</span>`
+        + `<span>Vol <b>${fmtCompact(bar.v)}</b></span>`
+      : `<span><b class="${cls}">${fmtNumber(bar.c)}</b></span>`
+        + `<span class="${cls}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</span>`
+        + `<span>Vol <b>${fmtCompact(bar.v)}</b></span>`;
+  };
+
+  const renderLegendForCrosshair = (param: MouseEventParams): void => {
+    if (typeof param.time !== "number") {
+      renderLegend(bars.length - 1);
+      return;
+    }
+
+    const timestampMs = param.time * 1000;
+    const index = bars.findIndex((bar) => bar.t === timestampMs);
+    renderLegend(index >= 0 ? index : bars.length - 1);
+  };
+
+  const syncPreviousCloseLine = (): void => {
+    if (!priceSeries) {
+      return;
+    }
+
+    if (previousCloseLine) {
+      priceSeries.removePriceLine(previousCloseLine);
+      previousCloseLine = null;
+    }
+
+    if (previousClose !== null && Number.isFinite(previousClose) && previousClose > 0) {
+      previousCloseLine = priceSeries.createPriceLine({
+        price: previousClose,
+        color: "rgba(148, 163, 184, 0.55)",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: false,
+        title: "prev close",
+      });
+    }
+  };
 
   const scheduleShading = (): void => {
     if (shadingFrame !== null || !priceChart || !volumeChart) {
@@ -272,8 +341,13 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
 
     volumeSeries = volumeChart.addSeries(HistogramSeries, { priceFormat: { type: "volume" } });
 
+    legendEl = document.createElement("div");
+    legendEl.className = "chart-legend";
+    priceContainer.appendChild(legendEl);
+
     const price = priceChart;
     const volume = volumeChart;
+    price.subscribeCrosshairMove(renderLegendForCrosshair);
     price.timeScale().subscribeVisibleLogicalRangeChange(() => mirrorRange(price, volume));
     volume.timeScale().subscribeVisibleLogicalRangeChange(() => mirrorRange(volume, price));
 
@@ -297,6 +371,8 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
 
     if (priceSeries) {
       priceChart.removeSeries(priceSeries);
+      // Any reference line died with the series it was drawn on.
+      previousCloseLine = null;
     }
 
     chartType = nextChartType;
@@ -369,6 +445,9 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     for (const [period, series] of movingAverageSeries) {
       series.setData(buildMovingAverageData(bars, period));
     }
+
+    syncPreviousCloseLine();
+    renderLegend(bars.length - 1);
   };
 
   /**
@@ -430,6 +509,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
 
     bars = request.bars;
     viewKey = request.viewKey;
+    previousClose = request.previousClose;
     syncPriceSeries(request.chartType);
     syncMovingAverageSeries(request.movingAveragePeriods);
     applyData();
@@ -493,6 +573,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       }
     }
 
+    renderLegend(bars.length - 1);
     scheduleShading();
   };
 
@@ -513,6 +594,9 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     clearSessionShading(priceContainer);
     clearSessionShading(volumeContainer);
 
+    legendEl?.remove();
+    legendEl = null;
+
     priceChart?.remove();
     volumeChart?.remove();
     priceChart = null;
@@ -522,6 +606,8 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     movingAverageSeries.clear();
     resetKey = null;
     newestSeriesTime = null;
+    previousClose = null;
+    previousCloseLine = null;
   };
 
   return { render, applyLiveBars, getVisibleLogicalRange, dispose };

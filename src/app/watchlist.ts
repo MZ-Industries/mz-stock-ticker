@@ -1,5 +1,18 @@
-import { fmtNumber, fmtPct } from "./utils";
+import { els } from "./elements";
+import { state } from "./store";
+import { escapeHtml, fmtNumber, fmtPct } from "./utils";
 import type { SnapshotItem } from "./types";
+
+export type WatchlistBadgeMode = "percent" | "delta";
+
+function currentBadgeMode(): WatchlistBadgeMode {
+  return state.prefs.watchlistBadgeMode === "delta" ? "delta" : "percent";
+}
+
+function fmtDelta(value: number): string {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${fmtNumber(value)}`;
+}
 
 function getWatchlistDisplay(item?: SnapshotItem): {
   price: string;
@@ -20,18 +33,49 @@ function getWatchlistDisplay(item?: SnapshotItem): {
     : hasPreMarket
       ? (item?.pre_market_price as number)
       : item?.price;
-  const displayChange = hasAfterHours
+  const displayChangePct = hasAfterHours
     ? (item?.post_market_change_percent as number)
     : hasPreMarket
       ? (item?.pre_market_change_percent as number)
       : item?.change_percent;
 
+  let change = "--";
+  if (displayChangePct !== undefined && item) {
+    if (currentBadgeMode() === "delta") {
+      let delta: number | null = null;
+      if (hasAfterHours || hasPreMarket) {
+        // Extended-hours move is measured from the official close.
+        if (Number.isFinite(item.price) && item.price > 0) {
+          delta = (displayPrice as number) - item.price;
+        }
+      } else {
+        const previousClose = Number.isFinite(item.previous_close) && (item.previous_close as number) > 0
+          ? (item.previous_close as number)
+          : Math.abs(100 + item.change_percent) > Number.EPSILON
+            ? (item.price * 100) / (100 + item.change_percent)
+            : Number.NaN;
+        if (Number.isFinite(previousClose)) {
+          delta = item.price - previousClose;
+        }
+      }
+
+      change = delta !== null && Number.isFinite(delta) ? fmtDelta(delta) : fmtPct(displayChangePct);
+    } else {
+      change = fmtPct(displayChangePct);
+    }
+  }
+
   const price = displayPrice !== undefined ? fmtNumber(displayPrice) : "--";
-  const change = displayChange !== undefined ? fmtPct(displayChange) : "--";
-  const cls = displayChange !== undefined && displayChange >= 0 ? "up" : "down";
+  const cls = displayChangePct !== undefined && displayChangePct >= 0 ? "up" : "down";
   const sessionLabel = hasAfterHours ? " AH" : hasPreMarket ? " PM" : "";
 
   return { price, change, cls, sessionLabel };
+}
+
+export function cycleWatchlistBadgeMode(): WatchlistBadgeMode {
+  const next: WatchlistBadgeMode = currentBadgeMode() === "percent" ? "delta" : "percent";
+  state.prefs.watchlistBadgeMode = next;
+  return next;
 }
 
 export function renderSparklineSvg(prices: number[], isPositive: boolean): string {
@@ -55,18 +99,13 @@ export function renderSparklineSvg(prices: number[], isPositive: boolean): strin
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" fill="none"><polyline points="${pts}" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
 
-export function patchWatchlistRow(
-  watchlistListEl: HTMLDivElement,
-  ticker: string,
-  latestSnapshotsByTicker: Map<string, SnapshotItem>,
-  latestSparklinesByTicker: Map<string, number[]>,
-): void {
-  const rowButton = watchlistListEl.querySelector(`[data-ticker="${ticker}"]`) as HTMLButtonElement | null;
+export function patchWatchlistRow(ticker: string): void {
+  const rowButton = els.watchlistListEl.querySelector(`[data-ticker="${ticker}"]`) as HTMLButtonElement | null;
   if (!rowButton) {
     return;
   }
 
-  const display = getWatchlistDisplay(latestSnapshotsByTicker.get(ticker));
+  const display = getWatchlistDisplay(state.latestSnapshotsByTicker.get(ticker));
 
   const priceEl = rowButton.querySelector(".watch-price") as HTMLSpanElement | null;
   const changeEl = rowButton.querySelector(".watch-change-badge") as HTMLSpanElement | null;
@@ -79,21 +118,17 @@ export function patchWatchlistRow(
   }
 
   const sparklineEl = rowButton.querySelector(".watch-sparkline") as HTMLDivElement | null;
-  const sparklinePrices = latestSparklinesByTicker.get(ticker);
+  const sparklinePrices = state.latestSparklinesByTicker.get(ticker);
   if (sparklineEl && sparklinePrices && sparklinePrices.length >= 2) {
     sparklineEl.innerHTML = renderSparklineSvg(sparklinePrices, display.cls === "up");
   }
 }
 
-export function renderWatchlistRows(
-  watchlistListEl: HTMLDivElement,
-  watchlistSymbols: string[],
-  selectedTicker: string,
-  latestSparklinesByTicker: Map<string, number[]>,
-  pricesByTicker?: Map<string, SnapshotItem>,
-): void {
-  watchlistListEl.innerHTML = watchlistSymbols.map((ticker) => {
-    const snapshot = pricesByTicker?.get(ticker);
+export function renderWatchlistRows(): void {
+  const { watchlistSymbols, selectedTicker, latestSparklinesByTicker, latestSnapshotsByTicker } = state;
+
+  els.watchlistListEl.innerHTML = watchlistSymbols.map((ticker) => {
+    const snapshot = latestSnapshotsByTicker.get(ticker);
     const display = getWatchlistDisplay(snapshot);
     const selected = ticker === selectedTicker ? "selected" : "";
     const name = snapshot?.name ?? "";
@@ -108,12 +143,12 @@ export function renderWatchlistRows(
         <button class="watch-row ${selected}" data-ticker="${ticker}">
           <div class="watch-identity">
             <span class="watch-ticker">${ticker}</span>
-            ${name ? `<span class="watch-name">${name}</span>` : ""}
+            ${name ? `<span class="watch-name">${escapeHtml(name)}</span>` : ""}
           </div>
           <div class="watch-sparkline">${sparklineSvg}</div>
           <div class="watch-prices">
             <span class="watch-price">${display.price}</span>
-            <span class="watch-change-badge ${display.cls}">${display.change}${display.sessionLabel}</span>
+            <span class="watch-change-badge ${display.cls}" title="Click to toggle % / $ change">${display.change}${display.sessionLabel}</span>
           </div>
         </button>
         <button class="watch-remove" data-remove-ticker="${ticker}" aria-label="Remove ${ticker}">x</button>
@@ -127,6 +162,7 @@ export type WatchlistDragDeps = {
   onReorder: (draggedTicker: string, targetTicker: string, placeAfter: boolean) => boolean;
   onSelectTicker: (ticker: string) => Promise<void>;
   onRenderRows: () => void;
+  onBadgeClick: () => void;
   setSuppressWatchlistClick: (value: boolean) => void;
 };
 
@@ -136,6 +172,7 @@ export function setupWatchlistDragAndDrop(deps: WatchlistDragDeps): void {
     onReorder,
     onSelectTicker,
     onRenderRows,
+    onBadgeClick,
     setSuppressWatchlistClick,
   } = deps;
 
@@ -143,6 +180,7 @@ export function setupWatchlistDragAndDrop(deps: WatchlistDragDeps): void {
   let draggingPointerId: number | null = null;
   let draggingStarted = false;
   let draggingStartY = 0;
+  let pointerDownOnBadge = false;
   let pendingDropInfo: { targetTicker: string; placeAfter: boolean } | null = null;
 
   const clearDragStyling = () => {
@@ -204,6 +242,7 @@ export function setupWatchlistDragAndDrop(deps: WatchlistDragDeps): void {
     draggingTicker = null;
     draggingPointerId = null;
     draggingStarted = false;
+    pointerDownOnBadge = false;
     pendingDropInfo = null;
     clearDragStyling();
   };
@@ -231,6 +270,7 @@ export function setupWatchlistDragAndDrop(deps: WatchlistDragDeps): void {
     draggingPointerId = event.pointerId;
     draggingStartY = event.clientY;
     draggingStarted = false;
+    pointerDownOnBadge = Boolean(target.closest(".watch-change-badge"));
     pendingDropInfo = null;
 
     try {
@@ -269,7 +309,11 @@ export function setupWatchlistDragAndDrop(deps: WatchlistDragDeps): void {
       setSuppressWatchlistClick(true);
     } else if (!draggingStarted) {
       setSuppressWatchlistClick(true);
-      void onSelectTicker(draggingTicker);
+      if (pointerDownOnBadge) {
+        onBadgeClick();
+      } else {
+        void onSelectTicker(draggingTicker);
+      }
     }
 
     cleanupPointerDrag();

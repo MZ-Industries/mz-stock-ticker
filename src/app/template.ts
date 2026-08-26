@@ -7,9 +7,10 @@ export const APP_TEMPLATE = `
       <div class="watchlist-header">
         <h2>Symbols</h2>
         <form class="watchlist-add-form" id="watchlist-add-form">
-          <input id="watchlist-add-input" type="text" maxlength="12" placeholder="Add symbol" aria-label="Add symbol" />
+          <input id="watchlist-add-input" type="text" maxlength="32" placeholder="Search symbol or name" aria-label="Add symbol" autocomplete="off" spellcheck="false" />
           <button type="submit" class="watchlist-add-button">Add</button>
         </form>
+        <div class="search-results hidden" id="search-results" role="listbox"></div>
       </div>
       <div class="watchlist-list" id="watchlist-list"></div>
     </aside>
@@ -18,24 +19,12 @@ export const APP_TEMPLATE = `
       <header class="topbar">
         <div>
           <h1 id="title-ticker">AAPL</h1>
-          <p class="subtle">NASDAQ · USD</p>
+          <p class="subtle" id="symbol-subtitle">&nbsp;</p>
         </div>
         <div class="price-headline">
           <p id="headline-price">-</p>
           <p id="headline-change" class="subtle">-</p>
-          <div id="extended-strip" class="extended-strip hidden" aria-label="Extended hours pricing">
-            <div class="extended-item">
-              <p id="close-price" class="extended-price">-</p>
-              <p id="close-change" class="extended-change subtle">-</p>
-              <p class="extended-label subtle">At Close</p>
-            </div>
-            <div class="extended-divider"></div>
-            <div class="extended-item">
-              <p id="after-price" class="extended-price">-</p>
-              <p id="after-change" class="extended-change subtle">-</p>
-              <p class="extended-label subtle">After Hours</p>
-            </div>
-          </div>
+          <div id="extended-strip" class="extended-strip hidden" aria-label="Extended hours pricing"></div>
         </div>
       </header>
       <div class="controls">
@@ -49,6 +38,7 @@ export const APP_TEMPLATE = `
         <div class="splitter horizontal" id="volume-splitter" role="separator" aria-orientation="horizontal"></div>
         <div class="volume-chart" id="volume-chart"></div>
       </div>
+      <div class="stats-strip" id="stats-strip" aria-label="Key statistics"></div>
       <div class="splitter horizontal" id="news-splitter" role="separator" aria-orientation="horizontal"></div>
       <section class="news-panel">
         <div class="news-header">
@@ -64,6 +54,7 @@ export const APP_TEMPLATE = `
       <span id="provider-pill" class="provider-pill">Provider: Yahoo</span>
       <span id="stream-pill" class="provider-pill muted">Live: off</span>
       <span id="lag-pill" class="provider-pill muted">Lag: --</span>
+      <span id="market-state-pill" class="provider-pill muted hidden"></span>
     </div>
   </section>
 `;

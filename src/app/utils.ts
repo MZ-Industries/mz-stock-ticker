@@ -1,5 +1,5 @@
 import type { TickMarkType, Time } from "lightweight-charts";
-import type { AggregateBar, AppPrefs, RangePreset } from "./types";
+import type { AggregateBar, RangePreset } from "./types";
 
 export function parseRetryAfterSeconds(error: unknown): number | null {
   const text = String(error);
@@ -98,31 +98,6 @@ export function parseStoredJson(key: string): unknown | null {
   }
 }
 
-export function normalizeWindowLayout(input: unknown): AppPrefs["windowLayout"] | null {
-  if (!input || typeof input !== "object") {
-    return null;
-  }
-
-  const candidate = input as AppPrefs["windowLayout"];
-  if (
-    Number.isFinite(candidate?.x)
-    && Number.isFinite(candidate?.y)
-    && Number.isFinite(candidate?.width)
-    && Number.isFinite(candidate?.height)
-    && typeof candidate?.maximized === "boolean"
-  ) {
-    return {
-      x: candidate.x,
-      y: candidate.y,
-      width: candidate.width,
-      height: candidate.height,
-      maximized: candidate.maximized,
-    };
-  }
-
-  return null;
-}
-
 export function normalizeVisibleRange(value: unknown): { from: number; to: number } | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -162,6 +137,59 @@ export function fmtNumber(value: number): string {
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
   }).format(value);
+}
+
+const HTML_ESCAPES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+/** All provider-supplied text goes through this before landing in innerHTML. */
+export function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => HTML_ESCAPES[char]);
+}
+
+/** Compact volume / market-cap style formatting: 12.3K, 45.6M, 7.89B, 1.23T. */
+export function fmtCompact(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "--";
+  }
+
+  const abs = Math.abs(value);
+  if (abs >= 1e12) {
+    return `${(value / 1e12).toFixed(2)}T`;
+  }
+  if (abs >= 1e9) {
+    return `${(value / 1e9).toFixed(2)}B`;
+  }
+  if (abs >= 1e6) {
+    return `${(value / 1e6).toFixed(2)}M`;
+  }
+  if (abs >= 1e3) {
+    return `${(value / 1e3).toFixed(1)}K`;
+  }
+  return fmtNumber(value);
+}
+
+export function formatRelativeTime(timestampMs: number): string {
+  const deltaSec = Math.max(0, Math.floor((Date.now() - timestampMs) / 1000));
+  if (deltaSec < 60) {
+    return "just now";
+  }
+  if (deltaSec < 3600) {
+    return `${Math.floor(deltaSec / 60)}m ago`;
+  }
+  if (deltaSec < 86_400) {
+    return `${Math.floor(deltaSec / 3600)}h ago`;
+  }
+  const days = Math.floor(deltaSec / 86_400);
+  if (days < 7) {
+    return `${days}d ago`;
+  }
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(timestampMs));
 }
 
 export function fmtPct(value: number): string {

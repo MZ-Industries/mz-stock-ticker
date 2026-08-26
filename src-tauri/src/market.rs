@@ -35,7 +35,7 @@ pub(crate) fn stop_active_stream(stream_state: &StreamState) {
 pub(crate) fn debug_enabled() -> bool {
     std::env::var("MASSIVE_DEBUG")
         .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(true)
+        .unwrap_or(false)
 }
 
 pub(crate) fn debug_log(message: &str) {
@@ -69,8 +69,22 @@ pub(crate) fn yahoo_client() -> Result<&'static Client, String> {
         return Ok(client);
     }
 
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_static("application/json, text/plain, */*"),
+    );
+    headers.insert(
+        reqwest::header::ACCEPT_LANGUAGE,
+        reqwest::header::HeaderValue::from_static("en-US,en;q=0.9"),
+    );
+
+    // The cookie store matters: Yahoo's quote endpoint only honours a crumb when
+    // the request carries the session cookie the crumb was minted under.
     let client = Client::builder()
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36")
+        .default_headers(headers)
+        .cookie_store(true)
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|err| format!("Failed to build Yahoo HTTP client: {}", err))?;
@@ -80,6 +94,68 @@ pub(crate) fn yahoo_client() -> Result<&'static Client, String> {
     YAHOO_CLIENT
         .get()
         .ok_or_else(|| "Yahoo HTTP client initialization failed".to_string())
+}
+
+fn crumb_cell() -> &'static Mutex<Option<String>> {
+    YAHOO_CRUMB.get_or_init(|| Mutex::new(None))
+}
+
+pub(crate) fn invalidate_crumb() {
+    if let Ok(mut guard) = crumb_cell().lock() {
+        *guard = None;
+    }
+}
+
+/// Yahoo's v7 quote endpoint requires a session cookie plus a matching "crumb"
+/// token (enforced since May 2023). Any yahoo.com response provides the cookie;
+/// /v1/test/getcrumb then mints the crumb for it. Both are cached: the cookie in
+/// the client's jar, the crumb here until a 401/403 invalidates it.
+pub(crate) async fn acquire_crumb() -> Result<String, String> {
+    if let Ok(guard) = crumb_cell().lock() {
+        if let Some(crumb) = guard.clone() {
+            return Ok(crumb);
+        }
+    }
+
+    let client = yahoo_client()?;
+
+    // Expected to answer 404; its Set-Cookie is what we are after.
+    let _ = client.get("https://fc.yahoo.com").send().await;
+
+    let response = client
+        .get(format!("{}/v1/test/getcrumb", yahoo_base_url()))
+        .send()
+        .await
+        .map_err(|err| format!("Crumb network error: {}", err))?;
+
+    if response.status().as_u16() == 429 {
+        return Err(rate_limit_error("crumb", &response));
+    }
+
+    if !response.status().is_success() {
+        return Err(format!("Crumb request failed: HTTP {}", response.status()));
+    }
+
+    let crumb = response
+        .text()
+        .await
+        .map_err(|err| format!("Crumb read error: {}", err))?
+        .trim()
+        .to_string();
+
+    let looks_valid = !crumb.is_empty()
+        && crumb.len() <= 64
+        && !crumb.contains('<')
+        && !crumb.contains('{');
+    if !looks_valid {
+        return Err("Crumb response did not look like a crumb".to_string());
+    }
+
+    if let Ok(mut guard) = crumb_cell().lock() {
+        *guard = Some(crumb.clone());
+    }
+    debug_log("crumb:acquired");
+    Ok(crumb)
 }
 
 pub(crate) fn rate_limit_error(prefix: &str, response: &reqwest::Response) -> String {
@@ -98,7 +174,8 @@ pub(crate) fn is_regular_market_bar(timestamp_ms: i64) -> bool {
     let mins = dt.hour() * 60 + dt.minute();
     let open = 9 * 60 + 30;
     let close = 16 * 60;
-    mins >= open && mins <= close
+    // The 16:00 bar starts the after-hours session, matching the front end.
+    mins >= open && mins < close
 }
 
 pub(crate) fn interval_to_ms(multiplier: u16, timespan: &str) -> Option<i64> {
@@ -217,101 +294,38 @@ pub(crate) async fn fetch_massive_volume_overlay(
     Ok(by_bucket)
 }
 
-pub(crate) async fn fetch_snapshot_from_chart(client: &Client, ticker: &str) -> SnapshotItem {
-    let mut url = match Url::parse(&format!("{}/v8/finance/chart/{}", yahoo_base_url(), ticker)) {
-        Ok(value) => value,
-        Err(_) => {
-            return SnapshotItem {
-                ticker: ticker.to_string(),
-                price: 0.0,
-                change_percent: 0.0,
-                quote_timestamp_ms: None,
-                pre_market_price: None,
-                pre_market_change_percent: None,
-                post_market_price: None,
-                post_market_change_percent: None,
-                name: None,
-            }
-        }
-    };
-
+/// Fetches the chart payload for a single day; shared by the snapshot and
+/// symbol-detail fallbacks that read its `meta` when the quote endpoint is
+/// unavailable.
+async fn fetch_chart_payload(client: &Client, ticker: &str) -> Option<YahooChartResult> {
+    let mut url = Url::parse(&format!("{}/v8/finance/chart/{}", yahoo_base_url(), ticker)).ok()?;
     url.query_pairs_mut()
         .append_pair("range", "1d")
         .append_pair("interval", "1m")
         .append_pair("includePrePost", "true");
 
-    let response = match client.get(url).send().await {
-        Ok(value) => value,
-        Err(_) => {
-            return SnapshotItem {
-                ticker: ticker.to_string(),
-                price: 0.0,
-                change_percent: 0.0,
-                quote_timestamp_ms: None,
-                pre_market_price: None,
-                pre_market_change_percent: None,
-                post_market_price: None,
-                post_market_change_percent: None,
-                name: None,
-            }
-        }
-    };
-
+    let response = client.get(url).send().await.ok()?;
     if !response.status().is_success() {
-        return SnapshotItem {
-            ticker: ticker.to_string(),
-            price: 0.0,
-            change_percent: 0.0,
-            quote_timestamp_ms: None,
-            pre_market_price: None,
-            pre_market_change_percent: None,
-            post_market_price: None,
-            post_market_change_percent: None,
-            name: None,
-        };
+        return None;
     }
 
-    let payload = match response.json::<YahooChartResponse>().await {
-        Ok(value) => value,
-        Err(_) => {
-            return SnapshotItem {
-                ticker: ticker.to_string(),
-                price: 0.0,
-                change_percent: 0.0,
-                quote_timestamp_ms: None,
-                pre_market_price: None,
-                pre_market_change_percent: None,
-                post_market_price: None,
-                post_market_change_percent: None,
-                name: None,
-            }
-        }
+    let payload = response.json::<YahooChartResponse>().await.ok()?;
+    payload.chart.result.unwrap_or_default().into_iter().next()
+}
+
+pub(crate) async fn fetch_snapshot_from_chart(client: &Client, ticker: &str) -> SnapshotItem {
+    let Some(chart) = fetch_chart_payload(client, ticker).await else {
+        return SnapshotItem::empty(ticker);
     };
 
-    let chart = payload.chart.result.unwrap_or_default().into_iter().next();
-    let Some(chart) = chart else {
-        return SnapshotItem {
-            ticker: ticker.to_string(),
-            price: 0.0,
-            change_percent: 0.0,
-            quote_timestamp_ms: None,
-            pre_market_price: None,
-            pre_market_change_percent: None,
-            post_market_price: None,
-            post_market_change_percent: None,
-            name: None,
-        };
-    };
-
-    let close_from_meta = chart.meta.as_ref().and_then(|meta| meta.regular_market_price);
-    let prev_close = chart.meta.as_ref().and_then(|meta| meta.previous_close);
-    let pre_market_price = chart.meta.as_ref().and_then(|meta| meta.pre_market_price);
-    let pre_market_change_percent = chart.meta.as_ref().and_then(|meta| meta.pre_market_change_percent);
-    let post_market_price = chart.meta.as_ref().and_then(|meta| meta.post_market_price);
-    let post_market_change_percent = chart
-        .meta
-        .as_ref()
-        .and_then(|meta| meta.post_market_change_percent);
+    let meta = chart.meta.as_ref();
+    let close_from_meta = meta.and_then(|meta| meta.regular_market_price);
+    let prev_close = meta.and_then(|meta| meta.previous_close.or(meta.chart_previous_close));
+    let pre_market_price = meta.and_then(|meta| meta.pre_market_price);
+    let pre_market_change_percent = meta.and_then(|meta| meta.pre_market_change_percent);
+    let post_market_price = meta.and_then(|meta| meta.post_market_price);
+    let post_market_change_percent = meta.and_then(|meta| meta.post_market_change_percent);
+    let name = meta.and_then(|meta| meta.short_name.clone().or_else(|| meta.long_name.clone()));
 
     let close_from_bars = chart
         .indicators
@@ -335,12 +349,61 @@ pub(crate) async fn fetch_snapshot_from_chart(client: &Client, ticker: &str) -> 
         ticker: ticker.to_string(),
         price,
         change_percent,
+        previous_close: prev_close,
         quote_timestamp_ms: None,
         pre_market_price,
         pre_market_change_percent,
         post_market_price,
         post_market_change_percent,
-        name: None,
+        name,
+    }
+}
+
+/// Detail fallback built from chart meta alone. Covers price ranges, volume,
+/// and identity; valuation stats (market cap, P/E, EPS, yield) need the quote
+/// endpoint and stay None here.
+pub(crate) async fn fetch_detail_from_chart(client: &Client, ticker: &str) -> SymbolDetail {
+    let meta = fetch_chart_payload(client, ticker)
+        .await
+        .and_then(|chart| chart.meta);
+    let meta = meta.as_ref();
+
+    SymbolDetail {
+        ticker: ticker.to_string(),
+        name: meta.and_then(|m| m.long_name.clone().or_else(|| m.short_name.clone())),
+        exchange: meta.and_then(|m| m.full_exchange_name.clone()),
+        currency: meta.and_then(|m| m.currency.clone()),
+        market_state: None,
+        open: None,
+        day_high: meta.and_then(|m| m.regular_market_day_high),
+        day_low: meta.and_then(|m| m.regular_market_day_low),
+        previous_close: meta.and_then(|m| m.previous_close.or(m.chart_previous_close)),
+        volume: meta.and_then(|m| m.regular_market_volume),
+        average_volume_3m: None,
+        fifty_two_week_high: meta.and_then(|m| m.fifty_two_week_high),
+        fifty_two_week_low: meta.and_then(|m| m.fifty_two_week_low),
+        market_cap: None,
+        trailing_pe: None,
+        eps_ttm: None,
+        dividend_yield_percent: None,
+    }
+}
+
+pub(crate) fn get_cached_detail(ticker: &str) -> Option<SymbolDetail> {
+    let cache = DETAIL_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let map = cache.lock().ok()?;
+    let (item, seen_at) = map.get(ticker)?;
+    if seen_at.elapsed() <= DETAIL_CACHE_TTL {
+        Some(item.clone())
+    } else {
+        None
+    }
+}
+
+pub(crate) fn put_cached_detail(item: SymbolDetail) {
+    let cache = DETAIL_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(mut map) = cache.lock() {
+        map.insert(item.ticker.clone(), (item, Instant::now()));
     }
 }
 
