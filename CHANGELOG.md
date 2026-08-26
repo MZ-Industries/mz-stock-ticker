@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.2.1...v0.2.2) (2026-08-26)
+
+
+### Miscellaneous Chores
+
+* cut release ([217ccdf](https://github.com/MZ-Industries/mz-stock-ticker/commit/217ccdfafeeda041f079b0cf2c6e29b7db2696b8))
+
 ## [0.2.1](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.2.0...v0.2.1) (2026-08-26)
 
 
