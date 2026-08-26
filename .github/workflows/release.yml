@@ -145,6 +145,43 @@ jobs:
           releaseId: ${{ needs.release-please.outputs.release_id }}
           args: ${{ matrix.args }}
 
+      # tauri-action notarizes and staples the .app, but leaves the .dmg wrapper
+      # signed-but-unnotarized — which makes Gatekeeper warn when a user opens the
+      # downloaded disk image. Notarize + staple the DMG too, then replace the
+      # asset tauri-action uploaded to the (still-draft) release.
+      - name: Notarize and staple DMG
+        if: startsWith(matrix.platform, 'macos')
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_PASSWORD:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ]; then
+            echo "Apple notarization credentials not set; skipping DMG notarization."
+            exit 0
+          fi
+          shopt -s nullglob
+          dmgs=(src-tauri/target/*/release/bundle/dmg/*.dmg)
+          if [ ${#dmgs[@]} -eq 0 ]; then
+            echo "No DMG found under src-tauri/target/*/release/bundle/dmg/; nothing to notarize."
+            exit 0
+          fi
+          for dmg in "${dmgs[@]}"; do
+            echo "::group::Notarizing $(basename "$dmg")"
+            xcrun notarytool submit "$dmg" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait
+            xcrun stapler staple "$dmg"
+            xcrun stapler validate "$dmg"
+            gh release upload "$TAG" "$dmg" --clobber -R "${{ github.repository }}"
+            echo "::endgroup::"
+          done
+
   publish:
     name: Publish release
     needs: [release-please, build]
