@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.2.0...v0.2.1) (2026-08-26)
+
+
+### Continuous Integration
+
+* sign and notarize macOS builds ([d12e355](https://github.com/MZ-Industries/mz-stock-ticker/commit/d12e355fde179893d6cf18a2bae61e8f0895f1b1))
+
 ## [0.2.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.1.0...v0.2.0) (2026-08-26)
 
 
