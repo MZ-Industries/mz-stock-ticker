@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.3](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.2.2...v0.2.3) (2026-09-01)
+
+
+### Bug Fixes
+
+* scale chart X-axis labels with zoom level ([ba9974a](https://github.com/MZ-Industries/mz-stock-ticker/commit/ba9974a32e5a382a12697d6fab7d2bfd0aa08f10))
+
+
+### Miscellaneous Chores
+
+* cut release ([f59f032](https://github.com/MZ-Industries/mz-stock-ticker/commit/f59f03289ff8ce188edbe96d33ddaa8e305a1c89))
+
 ## [0.2.2](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.2.1...v0.2.2) (2026-08-26)
 
 
