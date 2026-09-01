@@ -1,9 +1,11 @@
+import { TickMarkType, type UTCTimestamp } from "lightweight-charts";
 import { describe, expect, it } from "vitest";
 import {
   clamp,
   escapeHtml,
   fmtCompact,
   fmtPct,
+  formatAxisTime,
   isRateLimitError,
   normalizeMovingAveragePeriods,
   normalizeStoredRatio,
@@ -115,5 +117,31 @@ describe("fmtPct / clamp", () => {
   it("clamps", () => {
     expect(clamp(0, 1, 5)).toBe(1);
     expect(clamp(0, 1, -5)).toBe(0);
+  });
+});
+
+describe("formatAxisTime", () => {
+  // 2026-08-28 14:30 ET (18:30 UTC), a regular-session minute bar.
+  const intradayTime = Math.floor(Date.UTC(2026, 7, 28, 18, 30) / 1000) as UTCTimestamp;
+
+  it("labels intra-day ticks with a clock time", () => {
+    expect(formatAxisTime(intradayTime, TickMarkType.Time, "minute", false)).toBe("14:30");
+  });
+
+  it("adds the date to intra-day ticks when the view spans multiple days", () => {
+    expect(formatAxisTime(intradayTime, TickMarkType.Time, "minute", true)).toBe("Aug 28 14:30");
+  });
+
+  it("labels day-boundary ticks with a date even on intraday timespans", () => {
+    expect(formatAxisTime(intradayTime, TickMarkType.DayOfMonth, "minute", false)).toBe("Aug 28");
+  });
+
+  it("labels month- and year-boundary ticks at coarser granularity", () => {
+    expect(formatAxisTime(intradayTime, TickMarkType.Month, "minute", true)).toBe("Aug");
+    expect(formatAxisTime(intradayTime, TickMarkType.Year, "hour", true)).toBe("2026");
+  });
+
+  it("never shows a clock time on the day timespan", () => {
+    expect(formatAxisTime(intradayTime, TickMarkType.Time, "day", true)).toBe("Aug 28");
   });
 });

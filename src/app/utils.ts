@@ -1,4 +1,4 @@
-import type { TickMarkType, Time } from "lightweight-charts";
+import { TickMarkType, type Time } from "lightweight-charts";
 import type { AggregateBar, RangePreset } from "./types";
 
 export function parseRetryAfterSeconds(error: unknown): number | null {
@@ -197,7 +197,35 @@ export function fmtPct(value: number): string {
   return `${sign}${value.toFixed(2)}%`;
 }
 
-export function formatAxisTime(time: Time, _tickType: TickMarkType, timespan: RangePreset["timespan"]): string | null {
+// Reused across calls: the axis formatter runs for every tick on every repaint,
+// and constructing an Intl.DateTimeFormat is orders of magnitude more expensive
+// than formatting with one.
+const NY_AXIS_YEAR = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  year: "numeric",
+});
+const NY_AXIS_MONTH = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  month: "short",
+});
+const NY_AXIS_DATE = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  month: "short",
+  day: "numeric",
+});
+const NY_AXIS_TIME = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+export function formatAxisTime(
+  time: Time,
+  tickType: TickMarkType,
+  timespan: RangePreset["timespan"],
+  multiDay: boolean,
+): string | null {
   if (typeof time === "string") {
     return time;
   }
@@ -208,20 +236,25 @@ export function formatAxisTime(time: Time, _tickType: TickMarkType, timespan: Ra
 
   const date = new Date(time * 1000);
 
-  if (timespan === "day") {
-    return new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/New_York",
-      month: "short",
-      day: "numeric",
-    }).format(date);
+  // The tick type is the zoom level's word on what this tick marks. Zoomed out
+  // over intraday bars, ticks land on day/month/year boundaries and must read
+  // as dates - only genuinely intra-day ticks get a clock time. When the view
+  // spans several days, a bare clock time is ambiguous, so it carries its date.
+  switch (tickType) {
+    case TickMarkType.Year:
+      return NY_AXIS_YEAR.format(date);
+    case TickMarkType.Month:
+      return NY_AXIS_MONTH.format(date);
+    case TickMarkType.DayOfMonth:
+      return NY_AXIS_DATE.format(date);
+    default:
+      if (timespan === "day") {
+        return NY_AXIS_DATE.format(date);
+      }
+      return multiDay
+        ? `${NY_AXIS_DATE.format(date)} ${NY_AXIS_TIME.format(date)}`
+        : NY_AXIS_TIME.format(date);
   }
-
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
 }
 
 export function formatTooltipTime(time: Time, timespan: RangePreset["timespan"]): string {

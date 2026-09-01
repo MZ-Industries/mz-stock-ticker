@@ -17,7 +17,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { fmtCompact, fmtNumber, formatAxisTime, formatTooltipTime } from "./utils";
+import { clamp, fmtCompact, fmtNumber, formatAxisTime, formatTooltipTime, getNyParts } from "./utils";
 import type { AggregateBar, ChartType, RangePreset } from "./types";
 
 export type VisibleRange = { from: number; to: number };
@@ -212,6 +212,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   let legendEl: HTMLDivElement | null = null;
   let defaultVisibleRange: VisibleRange | null = null;
   let lastViewResetAtMs = 0;
+  let multiDayView = false;
 
   const maybeRequestOlderData = (range: VisibleRange | null): void => {
     if (!range || bars.length === 0 || !deps.onNeedOlderData) {
@@ -307,12 +308,37 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       borderVisible: false,
       timeVisible: timespan !== "day",
       tickMarkFormatter: (time: Time, tickMarkType: TickMarkType) =>
-        formatAxisTime(time, tickMarkType, timespan),
+        formatAxisTime(time, tickMarkType, timespan, multiDayView),
     },
     localization: {
       timeFormatter: (time: Time) => formatTooltipTime(time, timespan),
     },
   });
+
+  /**
+   * Intra-day tick labels carry their date ("Aug 28 14:30") whenever the
+   * visible window spans more than one New York calendar day, because a bare
+   * clock time is ambiguous with several sessions on screen. The formatter
+   * can't see the visible range, so the flag is tracked here - and a flip has
+   * to re-apply the axis options, which is what flushes lightweight-charts'
+   * cache of already-formatted tick labels.
+   */
+  const syncMultiDayView = (range: VisibleRange | null): void => {
+    if (!priceChart || !volumeChart || !range || bars.length === 0) {
+      return;
+    }
+
+    const lastIndex = bars.length - 1;
+    const firstVisible = bars[clamp(0, lastIndex, Math.round(range.from))];
+    const lastVisible = bars[clamp(0, lastIndex, Math.round(range.to))];
+    const multiDay = getNyParts(firstVisible.t).date !== getNyParts(lastVisible.t).date;
+
+    if (multiDay !== multiDayView) {
+      multiDayView = multiDay;
+      priceChart.applyOptions(timeAxisOptions());
+      volumeChart.applyOptions(timeAxisOptions());
+    }
+  };
 
   const mirrorRange = (source: IChartApi, target: IChartApi): void => {
     const range = source.timeScale().getVisibleLogicalRange();
@@ -386,6 +412,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     price.subscribeCrosshairMove(renderLegendForCrosshair);
     price.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       mirrorRange(price, volume);
+      syncMultiDayView(range);
       maybeRequestOlderData(range);
     });
     volume.timeScale().subscribeVisibleLogicalRangeChange(() => mirrorRange(volume, price));
@@ -606,6 +633,10 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       restoreView();
     }
 
+    // A data refresh can change which dates the visible indices point at
+    // without moving the logical range, so the subscription won't fire.
+    syncMultiDayView(priceChart!.timeScale().getVisibleLogicalRange());
+
     scheduleShading();
   };
 
@@ -694,6 +725,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     previousClose = null;
     previousCloseLine = null;
     defaultVisibleRange = null;
+    multiDayView = false;
   };
 
   return { render, applyLiveBars, getVisibleLogicalRange, dispose };
