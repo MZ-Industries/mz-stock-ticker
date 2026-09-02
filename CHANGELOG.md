@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.2.3...v0.3.0) (2026-09-02)
+
+
+### Features
+
+* add in-app auto-updater via GitHub Releases ([060d818](https://github.com/MZ-Industries/mz-stock-ticker/commit/060d818f58a2b34cbae4f598829a5cb24d5d588f))
+
 ## [0.2.3](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.2.3...v0.2.3) (2026-09-02)
 
 
