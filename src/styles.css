@@ -449,14 +449,24 @@ p {
 
 .update-pill {
   margin-left: auto;
-  border-color: #7c5c1e;
-  background: rgba(250, 204, 21, 0.14);
-  color: #fde68a;
+  border-color: #2a3f53;
+  background: rgba(148, 163, 184, 0.12);
+  color: #b9c2d0;
   cursor: pointer;
   font-family: inherit;
 }
 
 .update-pill:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.24);
+}
+
+.update-pill.highlight {
+  border-color: #7c5c1e;
+  background: rgba(250, 204, 21, 0.14);
+  color: #fde68a;
+}
+
+.update-pill.highlight:hover:not(:disabled) {
   background: rgba(250, 204, 21, 0.26);
 }
 
