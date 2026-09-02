@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.2.3](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.4.0...v0.2.3) (2026-09-02)
+
+
+### Features
+
+* add core application structure with template, types, and UI components ([7e1c34e](https://github.com/MZ-Industries/mz-stock-ticker/commit/7e1c34eb0b2dc5b9bf14f8e58464a115651f18c0))
+* add in-app auto-updater via GitHub Releases ([060d818](https://github.com/MZ-Industries/mz-stock-ticker/commit/060d818f58a2b34cbae4f598829a5cb24d5d588f))
+* always-visible "Check for updates" control in the status line ([1b8caed](https://github.com/MZ-Industries/mz-stock-ticker/commit/1b8caed7a611307dadcf03567c18bb19a402ced7))
+* enhance UI components and add search functionality ([d9d4f1e](https://github.com/MZ-Industries/mz-stock-ticker/commit/d9d4f1e6162147e20265868a7d550b6cb282e0bf))
+* implement scroll-back history loading and enhance session handling ([bd1dd63](https://github.com/MZ-Industries/mz-stock-ticker/commit/bd1dd639a33dc48f9728a34f9673f6096dfc7390))
+
+
+### Bug Fixes
+
+* scale chart X-axis labels with zoom level ([ba9974a](https://github.com/MZ-Industries/mz-stock-ticker/commit/ba9974a32e5a382a12697d6fab7d2bfd0aa08f10))
+
+
+### Miscellaneous Chores
+
+* cut release ([f59f032](https://github.com/MZ-Industries/mz-stock-ticker/commit/f59f03289ff8ce188edbe96d33ddaa8e305a1c89))
+* cut release ([217ccdf](https://github.com/MZ-Industries/mz-stock-ticker/commit/217ccdfafeeda041f079b0cf2c6e29b7db2696b8))
+
+
+### Continuous Integration
+
+* sign and notarize macOS builds ([d12e355](https://github.com/MZ-Industries/mz-stock-ticker/commit/d12e355fde179893d6cf18a2bae61e8f0895f1b1))
+
 ## [0.4.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.3.0...v0.4.0) (2026-09-02)
 
 
