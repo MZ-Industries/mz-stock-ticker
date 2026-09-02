@@ -60,6 +60,10 @@ export const SPARKLINE_REFRESH_MS = 300_000;
 export const NEWS_REFRESH_MS = 300_000;
 export const SEARCH_DEBOUNCE_MS = 250;
 
+// Let the initial data load settle before hitting GitHub for the update check.
+export const UPDATE_CHECK_STARTUP_DELAY_MS = 10_000;
+export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 export const defaultPrefs: AppPrefs = {
   ticker: "AAPL",
   rangeLabel: "1M",

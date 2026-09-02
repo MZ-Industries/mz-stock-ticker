@@ -32,6 +32,7 @@ import { loadProviderStatus } from "./provider";
 import { hideSearchResults, setupSymbolSearch } from "./search";
 import { debugLog, isApiCooldownActive, persistPrefs, state } from "./store";
 import { renderControls, renderStats } from "./ui";
+import { initUpdater } from "./updater";
 import { normalizeTicker } from "./utils";
 import { cycleWatchlistBadgeMode, renderWatchlistRows, setupWatchlistDragAndDrop } from "./watchlist";
 import type { ChartType } from "./types";
@@ -332,6 +333,7 @@ export async function bootstrapApp(): Promise<void> {
   }, NEWS_REFRESH_MS);
 
   scheduleAdaptiveBarsRefresh();
+  initUpdater();
 }
 
 export function registerBeforeUnloadHandler(): void {

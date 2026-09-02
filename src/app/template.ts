@@ -55,6 +55,7 @@ export const APP_TEMPLATE = `
       <span id="stream-pill" class="provider-pill muted">Live: off</span>
       <span id="lag-pill" class="provider-pill muted">Lag: --</span>
       <span id="market-state-pill" class="provider-pill muted hidden"></span>
+      <button id="update-pill" class="provider-pill update-pill hidden" type="button"></button>
     </div>
   </section>
 `;

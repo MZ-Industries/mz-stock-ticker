@@ -23,6 +23,7 @@ export type AppElements = {
   streamPillEl: HTMLSpanElement;
   lagPillEl: HTMLSpanElement;
   marketStatePillEl: HTMLSpanElement;
+  updatePillEl: HTMLButtonElement;
 };
 
 /** Populated once by initElements() right after the template is injected. */
@@ -54,6 +55,7 @@ export function initElements(root: ParentNode = document): AppElements {
     streamPillEl: root.querySelector("#stream-pill") as HTMLSpanElement,
     lagPillEl: root.querySelector("#lag-pill") as HTMLSpanElement,
     marketStatePillEl: root.querySelector("#market-state-pill") as HTMLSpanElement,
+    updatePillEl: root.querySelector("#update-pill") as HTMLButtonElement,
   };
 
   return els;
