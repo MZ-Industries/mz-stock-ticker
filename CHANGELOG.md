@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.3.0...v0.4.0) (2026-09-02)
+
+
+### Features
+
+* always-visible "Check for updates" control in the status line ([1b8caed](https://github.com/MZ-Industries/mz-stock-ticker/commit/1b8caed7a611307dadcf03567c18bb19a402ced7))
+
 ## [0.3.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.2.3...v0.3.0) (2026-09-02)
 
 
