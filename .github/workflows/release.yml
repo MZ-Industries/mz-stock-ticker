@@ -200,6 +200,24 @@ jobs:
             "repos/${{ github.repository }}/releases/${{ needs.release-please.outputs.release_id }}" \
             -F draft=false
 
+      # The release-please job at the top of this run created the draft release,
+      # then re-analyzed the repo while the tag didn't exist yet (it was only
+      # created above, when the draft was published). In that window it concludes
+      # the just-merged release never shipped and re-opens a stale release PR
+      # (see #10/#12). Close any release-please PR now that the tag exists; the
+      # next real commit to main regenerates a correct one if needed.
+      - name: Close stale release-please PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for pr in $(gh pr list --state open \
+              --json number,headRefName \
+              --jq '.[] | select(.headRefName | startswith("release-please--")) | .number' \
+              -R "${{ github.repository }}"); do
+            gh pr close "$pr" --delete-branch -R "${{ github.repository }}" \
+              --comment "Auto-closed: opened mid-release before the tag existed. The next push to main regenerates a correct release PR if one is needed."
+          done
+
       # keep Cargo.lock's version of mz-stock-ticker in sync with the bump
       # release-please made in Cargo.toml, so local builds don't dirty the tree
       - uses: actions/checkout@v4
