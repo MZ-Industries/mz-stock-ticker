@@ -102,6 +102,8 @@ export type AppPrefs = {
   studyKeys?: string[];
   watchlistSymbols?: string[];
   watchlistBadgeMode?: "percent" | "delta";
+  /** Whether the app checks GitHub for updates on its own. */
+  autoUpdateCheck?: boolean;
   visibleRangesByViewKey?: Record<string, { from: number; to: number }>;
   sidebarWidth: number;
   pricePaneHeight: number;

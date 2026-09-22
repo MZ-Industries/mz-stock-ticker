@@ -1,25 +1,33 @@
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import {
+  listenMenuAutoUpdateCheck,
+  listenMenuCheckForUpdates,
+  setAutoUpdateCheckMenuItem,
+} from "./api";
+import {
   UPDATE_CHECK_INTERVAL_MS,
   UPDATE_CHECK_STARTUP_DELAY_MS,
   UPDATE_PILL_REVERT_MS,
 } from "./constants";
 import { els } from "./elements";
-import { debugLog } from "./store";
-
-const IDLE_LABEL = "Check for updates";
+import { debugLog, persistPrefs, state } from "./store";
 
 let pendingUpdate: Update | null = null;
 let checking = false;
 let installing = false;
 let revertTimer: number | null = null;
+let autoCheckTimer: number | null = null;
 
-function setPill(text: string, opts: { clickable?: boolean; highlight?: boolean } = {}): void {
+function clearRevertTimer(): void {
   if (revertTimer !== null) {
     window.clearTimeout(revertTimer);
     revertTimer = null;
   }
+}
+
+function setPill(text: string, opts: { clickable?: boolean; highlight?: boolean } = {}): void {
+  clearRevertTimer();
 
   els.updatePillEl.textContent = text;
   els.updatePillEl.disabled = opts.clickable !== true;
@@ -27,18 +35,37 @@ function setPill(text: string, opts: { clickable?: boolean; highlight?: boolean 
   els.updatePillEl.classList.remove("hidden");
 }
 
-/** Transient outcomes ("Up to date") fall back to the idle label after a beat. */
+/** The status line only speaks up when there is something to report. */
+function hidePill(): void {
+  clearRevertTimer();
+
+  els.updatePillEl.textContent = "";
+  els.updatePillEl.disabled = true;
+  els.updatePillEl.classList.remove("highlight");
+  els.updatePillEl.classList.add("hidden");
+}
+
+/** Transient outcomes ("Up to date") clear themselves after a beat. */
 function schedulePillRevert(): void {
   revertTimer = window.setTimeout(() => {
     revertTimer = null;
     if (!pendingUpdate && !installing) {
-      setPill(IDLE_LABEL, { clickable: true });
+      hidePill();
     }
   }, UPDATE_PILL_REVERT_MS);
 }
 
 async function checkForUpdate(manual: boolean): Promise<void> {
   if (checking || installing || pendingUpdate) {
+    return;
+  }
+
+  // The dev build is not an installed bundle, so there is nothing to replace.
+  if (import.meta.env.DEV) {
+    if (manual) {
+      setPill("Updates are disabled in dev");
+      schedulePillRevert();
+    }
     return;
   }
 
@@ -60,7 +87,8 @@ async function checkForUpdate(manual: boolean): Promise<void> {
     // Offline, GitHub unreachable, or no published release yet.
     debugLog("updater:check-failed", String(error));
     if (manual) {
-      setPill("Check failed — click to retry", { clickable: true });
+      setPill("Update check failed");
+      schedulePillRevert();
     }
   } finally {
     checking = false;
@@ -108,31 +136,75 @@ async function installPendingUpdate(): Promise<void> {
 }
 
 /**
- * Status-line pill offering on-demand update checks against GitHub Releases;
- * automatic checks run shortly after startup and every few hours. Installing
- * downloads the signed update, applies it, and relaunches the app. Skipped in
- * dev, where the running app is not an installed bundle.
+ * Single path for the automatic-check preference: persist it, mirror it into
+ * the menu's checkbox, and start or stop the background timer.
  */
-export function initUpdater(): void {
-  if (import.meta.env.DEV) {
+function applyAutoCheck(enabled: boolean, opts: { checkNow?: boolean } = {}): void {
+  state.prefs.autoUpdateCheck = enabled;
+  persistPrefs();
+
+  void setAutoUpdateCheckMenuItem(enabled).catch((error) => {
+    debugLog("updater:menu-sync-failed", String(error));
+  });
+
+  if (autoCheckTimer !== null) {
+    window.clearInterval(autoCheckTimer);
+    autoCheckTimer = null;
+  }
+
+  if (!enabled) {
     return;
   }
 
+  autoCheckTimer = window.setInterval(() => {
+    void checkForUpdate(false);
+  }, UPDATE_CHECK_INTERVAL_MS);
+
+  if (opts.checkNow) {
+    void checkForUpdate(false);
+  }
+}
+
+async function registerMenuHandlers(): Promise<void> {
+  try {
+    await listenMenuCheckForUpdates(() => {
+      if (pendingUpdate) {
+        void installPendingUpdate();
+        return;
+      }
+
+      void checkForUpdate(true);
+    });
+
+    await listenMenuAutoUpdateCheck((enabled) => {
+      applyAutoCheck(enabled, { checkNow: enabled });
+    });
+  } catch (error) {
+    debugLog("updater:menu-listen-failed", String(error));
+  }
+}
+
+/**
+ * Updates are driven from the application menu: "Check for Updates…" runs an
+ * on-demand check, and the checkbox beside it decides whether the app also
+ * checks shortly after startup and every few hours. The status-line pill
+ * reports whatever a check turned up and installs a waiting update, which
+ * downloads the signed bundle, applies it, and relaunches the app.
+ */
+export function initUpdater(): void {
   els.updatePillEl.addEventListener("click", () => {
     if (pendingUpdate) {
       void installPendingUpdate();
-    } else {
-      void checkForUpdate(true);
     }
   });
 
-  setPill(IDLE_LABEL, { clickable: true });
+  hidePill();
+  void registerMenuHandlers();
+  applyAutoCheck(state.prefs.autoUpdateCheck !== false);
 
   window.setTimeout(() => {
-    void checkForUpdate(false);
+    if (state.prefs.autoUpdateCheck !== false) {
+      void checkForUpdate(false);
+    }
   }, UPDATE_CHECK_STARTUP_DELAY_MS);
-
-  window.setInterval(() => {
-    void checkForUpdate(false);
-  }, UPDATE_CHECK_INTERVAL_MS);
 }

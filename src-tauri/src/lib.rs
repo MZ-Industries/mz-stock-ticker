@@ -14,6 +14,7 @@ mod commands;
 use commands::*;
 mod market;
 use market::*;
+mod menu;
 
 /// Tauri event carrying the freshly polled tail of the chart's series.
 pub(crate) const LIVE_BARS_EVENT: &str = "live-bars";
@@ -295,6 +296,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(StreamState::default())
+        .menu(menu::build)
+        .on_menu_event(menu::handle_event)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
@@ -309,7 +312,8 @@ pub fn run() {
             fetch_symbol_detail,
             search_symbols,
             start_live_stream,
-            stop_live_stream
+            stop_live_stream,
+            menu::set_auto_update_check
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

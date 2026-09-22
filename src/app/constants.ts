@@ -76,6 +76,7 @@ export const defaultPrefs: AppPrefs = {
   candleIntervalKey: "5m",
   movingAveragePeriods: [200],
   studyKeys: [],
+  autoUpdateCheck: true,
   sidebarWidth: 280,
   pricePaneHeight: 0,
   chartAreaHeight: 0,

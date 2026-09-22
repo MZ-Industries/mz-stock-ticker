@@ -60,3 +60,18 @@ export function stopLiveStream(): Promise<void> {
 export function listenLiveBars(handler: (event: LiveBarsEvent) => void): Promise<UnlistenFn> {
   return listen<LiveBarsEvent>("live-bars", (event) => handler(event.payload));
 }
+
+/** Mirrors the stored preference into the menu's automatic-check box. */
+export function setAutoUpdateCheckMenuItem(enabled: boolean): Promise<void> {
+  return invoke("set_auto_update_check", { enabled });
+}
+
+/** Fired when "Check for Updates…" is picked from the native menu. */
+export function listenMenuCheckForUpdates(handler: () => void): Promise<UnlistenFn> {
+  return listen("menu:check-for-updates", () => handler());
+}
+
+/** Fired with the new state whenever the menu's automatic-check box is toggled. */
+export function listenMenuAutoUpdateCheck(handler: (enabled: boolean) => void): Promise<UnlistenFn> {
+  return listen<boolean>("menu:auto-update-check", (event) => handler(event.payload));
+}
