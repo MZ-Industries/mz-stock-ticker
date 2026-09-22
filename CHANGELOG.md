@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.3](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.5.2...v0.5.3) (2026-09-22)
+
+
+### Bug Fixes
+
+* **updater:** report update checks in a dialog, not just the status line ([42a3117](https://github.com/MZ-Industries/mz-stock-ticker/commit/42a31170109506c87cd8a97b69f0f343c8b1c3e4))
+* **updater:** report update checks in a dialog, not just the status line ([2440840](https://github.com/MZ-Industries/mz-stock-ticker/commit/244084009bc44746cfb8781b937e5a20139472ba))
+
 ## [0.5.2](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.5.1...v0.5.2) (2026-09-22)
 
 
