@@ -1,7 +1,8 @@
 name: Release
 
 # Release flow (release-please):
-#  1. Every push to main updates a "release PR" that bumps the version
+#  1. Every push to main (other than a release-PR merge) updates a "release PR"
+#     that bumps the version
 #     (package.json, package-lock.json, tauri.conf.json, Cargo.toml) and
 #     updates CHANGELOG.md based on conventional commit messages.
 #  2. Merging that PR creates a DRAFT GitHub release.
@@ -32,12 +33,33 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
       release_id: ${{ steps.release.outputs.id }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      # Two invocations on purpose. Letting one invocation do both halves is
+      # what produced the duplicate release PRs (#10, #12, #14): the releases
+      # cut here are drafts, and a draft leaves no git tag behind, so the
+      # pull-request half of the same run found no tag for the version it had
+      # just released, walked back to the old "Release-As: 0.2.3" chore commit,
+      # and proposed that as the next release — a downgrade of the manifest.
+      #
+      # Split in two, merging a release PR only cuts the release, and every
+      # other push to main only maintains the release PR. Neither can see the
+      # half-finished state of the other.
+      - name: Cut the release for a merged release PR
+        uses: googleapis/release-please-action@v4
         id: release
         with:
+          skip-github-pull-request: true
           # Optional PAT (fine-grained: Contents + Pull requests read/write).
           # Using a PAT instead of GITHUB_TOKEN also makes CI run on the
           # release PRs. Falls back to the default token if the secret is unset.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Maintain the release PR
+        if: steps.release.outputs.release_created != 'true'
+        uses: googleapis/release-please-action@v4
+        with:
+          skip-github-release: true
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
@@ -200,12 +222,11 @@ jobs:
             "repos/${{ github.repository }}/releases/${{ needs.release-please.outputs.release_id }}" \
             -F draft=false
 
-      # The release-please job at the top of this run created the draft release,
-      # then re-analyzed the repo while the tag didn't exist yet (it was only
-      # created above, when the draft was published). In that window it concludes
-      # the just-merged release never shipped and re-opens a stale release PR
-      # (see #10/#12). Close any release-please PR now that the tag exists; the
-      # next real commit to main regenerates a correct one if needed.
+      # Backstop for the same confusion the split job above avoids: a push that
+      # lands on main *during* the build still meets a missing tag and can be
+      # answered with a downgrade PR. The tag exists by now, so close anything
+      # release-please opened; the next push to main regenerates a correct one
+      # if it is needed.
       - name: Close stale release-please PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
