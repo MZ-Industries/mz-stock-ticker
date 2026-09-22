@@ -30,3 +30,6 @@ dist-ssr
 
 # Playwright MCP scratch output
 .playwright-mcp/
+
+# Claude Code: local settings stay local, .claude/skills/ is shared
+.claude/settings.local.json
