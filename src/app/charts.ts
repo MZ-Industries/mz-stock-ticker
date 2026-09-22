@@ -20,6 +20,9 @@ import type { AggregateBar, ChartType, RangePreset } from "./types";
 
 export type VisibleRange = { from: number; to: number };
 
+/** A study point, or the whitespace that holds a bar's slot while it has no value. */
+type PlotPoint = { time: UTCTimestamp; value?: number; color?: string };
+
 const MOVING_AVERAGE_COLORS = ["#60a5fa", "#f59e0b", "#a78bfa", "#fb7185"] as const;
 
 // Logical-range deltas below this are sub-pixel. Mirroring them between the
@@ -821,26 +824,38 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     });
   };
 
-  /** Turns an indicator's aligned values into chart points, dropping the gaps. */
-  const toPlotData = (plot: StudyPlot): Array<{ time: UTCTimestamp; value: number; color?: string }> => {
-    const points: Array<{ time: UTCTimestamp; value: number; color?: string }> = [];
+  /**
+   * Turns an indicator's aligned values into chart points, one per bar.
+   *
+   * Gaps become whitespace points (a time with no value) instead of being
+   * dropped. Each study pane is its own chart, and the panes are kept in step by
+   * mirroring the *logical* range - an index into whatever data that chart
+   * holds. A series that skipped its warm-up bars would therefore start counting
+   * from a different bar than the price chart, and draw every value that many
+   * candles to the left of the one it belongs to.
+   */
+  const toPlotData = (plot: StudyPlot): Array<PlotPoint> => {
+    const points: Array<PlotPoint> = [];
     const length = Math.min(plot.values.length, bars.length);
+    let drawn = 0;
 
     for (let index = 0; index < length; index += 1) {
+      const time = toSeconds(bars[index]);
       const value = plot.values[index];
+
       if (value === null || !Number.isFinite(value)) {
+        points.push({ time });
         continue;
       }
 
+      drawn += 1;
       const color = plot.colors?.[index];
-      points.push(
-        color
-          ? { time: toSeconds(bars[index]), value, color }
-          : { time: toSeconds(bars[index]), value },
-      );
+      points.push(color ? { time, value, color } : { time, value });
     }
 
-    return points;
+    // Whitespace alone still counts as no points for the caller, which drops the
+    // series rather than hand lightweight-charts one it cannot colour.
+    return drawn > 0 ? points : [];
   };
 
   /**
