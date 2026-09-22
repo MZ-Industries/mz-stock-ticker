@@ -25,6 +25,16 @@ export const state = {
   selectedStudyKeys: [] as string[],
   watchlistSymbols: [...DEFAULT_WATCHLIST],
   latestBars: [] as AggregateBar[],
+  /**
+   * Which selection `latestBars` actually came back for. A range or ticker
+   * click flips the selection immediately, but the bars only catch up when the
+   * fetch lands, and anything that redraws the chart in between (a symbol
+   * detail arriving, a study toggle) would otherwise hand the chart the new
+   * keys with the old bars - which spends the one view reset on the wrong data
+   * and leaves the real one unable to fire.
+   */
+  loadedViewKey: "",
+  loadedResetKey: "",
   activeSessionDate: null as string | null,
   prefs: { ...defaultPrefs } as AppPrefs,
   prefsStore: null as Store | null,

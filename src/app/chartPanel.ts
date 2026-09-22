@@ -113,9 +113,17 @@ export function renderCharts(prependedBars?: number): void {
     previousClose: previousCloseForChart(),
     defaultVisibleRange: defaultViewForOneDay(),
     prependedBars,
-    viewKey: currentChartViewKey(),
-    resetKey: currentChartResetKey(),
+    // Keyed to the bars in hand, not to the selection: a redraw that lands
+    // between a range click and its bars arriving must not look like the new
+    // view has already been drawn.
+    viewKey: state.loadedViewKey || currentChartViewKey(),
+    resetKey: state.loadedResetKey || currentChartResetKey(),
   });
+}
+
+/** Drops any manual zoom or price-axis drag and re-opens the default window. */
+export function resetChartView(): void {
+  controller?.resetView();
 }
 
 export function pushLiveBars(bars: AggregateBar[]): void {

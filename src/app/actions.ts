@@ -8,6 +8,7 @@ import { barsRefreshCadenceMs, loadProviderStatus, updateLagPill } from "./provi
 import {
   currentAggregationPreset,
   currentChartResetKey,
+  currentChartViewKey,
   debugLog,
   enterApiCooldown,
   isApiCooldownActive,
@@ -29,7 +30,6 @@ import type { AggregateBar, LiveBarsEvent } from "./types";
 
 let unlistenLiveBars: UnlistenFn | null = null;
 let barsRefreshTimer: number | null = null;
-let lastLoadedResetKey = "";
 let backfillKey = "";
 let backfillInFlight = false;
 let backfillExhausted = false;
@@ -132,14 +132,13 @@ export async function loadBars(): Promise<void> {
     // A periodic refresh only refetches the recent window; keep any older bars
     // scroll-back already loaded so the user's history does not vanish.
     const resetKey = currentChartResetKey();
-    if (resetKey === lastLoadedResetKey && state.latestBars.length > 0) {
+    if (resetKey === state.loadedResetKey && state.latestBars.length > 0) {
       const cutoff = bars[0].t;
       const preserved = state.latestBars.filter((bar) => bar.t < cutoff);
       if (preserved.length > 0) {
         bars = [...preserved, ...bars];
       }
     }
-    lastLoadedResetKey = resetKey;
 
     if (state.selectedRange.label === "1D") {
       // The series spans several sessions; the latest one is what the headline
@@ -156,6 +155,8 @@ export async function loadBars(): Promise<void> {
     }
 
     state.latestBars = bars;
+    state.loadedViewKey = currentChartViewKey();
+    state.loadedResetKey = resetKey;
     updateLagPill(bars[bars.length - 1]?.t);
 
     renderCharts();
