@@ -461,7 +461,7 @@ p {
   font-family: inherit;
 }
 
-.update-pill:hover:not(:disabled) {
+.update-pill:hover {
   background: rgba(148, 163, 184, 0.24);
 }
 
@@ -471,13 +471,8 @@ p {
   color: #fde68a;
 }
 
-.update-pill.highlight:hover:not(:disabled) {
+.update-pill.highlight:hover {
   background: rgba(250, 204, 21, 0.26);
-}
-
-.update-pill:disabled {
-  cursor: default;
-  opacity: 0.75;
 }
 
 .range-group,
@@ -940,7 +935,8 @@ p {
 
 }
 
-.prefs-overlay {
+.prefs-overlay,
+.update-overlay {
   position: fixed;
   inset: 0;
   z-index: 1100;
@@ -952,7 +948,8 @@ p {
   backdrop-filter: blur(3px);
 }
 
-.prefs-panel {
+.prefs-panel,
+.update-panel {
   display: flex;
   flex-direction: column;
   width: min(560px, 100%);
@@ -964,7 +961,8 @@ p {
   box-shadow: 0 28px 60px rgba(0, 0, 0, 0.55);
 }
 
-.prefs-header {
+.prefs-header,
+.update-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -973,13 +971,15 @@ p {
   border-bottom: 1px solid var(--border);
 }
 
-.prefs-header h2 {
+.prefs-header h2,
+.update-header h2 {
   margin: 0;
   font-size: 15px;
   letter-spacing: 0.01em;
 }
 
-.prefs-close {
+.prefs-close,
+.update-close {
   border: none;
   background: transparent;
   color: var(--muted);
@@ -988,11 +988,13 @@ p {
   cursor: pointer;
 }
 
-.prefs-close:hover {
+.prefs-close:hover,
+.update-close:hover {
   color: var(--text);
 }
 
-.prefs-body {
+.prefs-body,
+.update-body {
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1047,7 +1049,8 @@ p {
   accent-color: var(--accent);
 }
 
-.prefs-footer {
+.prefs-footer,
+.update-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1071,7 +1074,8 @@ p {
   margin-left: auto;
 }
 
-.prefs-button {
+.prefs-button,
+.update-button {
   padding: 7px 14px;
   border: 1px solid #223247;
   border-radius: 9px;
@@ -1083,22 +1087,70 @@ p {
   cursor: pointer;
 }
 
-.prefs-button:hover:not(:disabled) {
+.prefs-button:hover:not(:disabled),
+.update-button:hover:not(:disabled) {
   color: var(--text);
   border-color: #2f4763;
 }
 
-.prefs-button.primary {
+.prefs-button.primary,
+.update-button.primary {
   border-color: rgba(45, 212, 191, 0.5);
   background: rgba(45, 212, 191, 0.14);
   color: #99f6e4;
 }
 
-.prefs-button.primary:hover:not(:disabled) {
+.prefs-button.primary:hover:not(:disabled),
+.update-button.primary:hover:not(:disabled) {
   background: rgba(45, 212, 191, 0.26);
 }
 
-.prefs-button:disabled {
+.prefs-button:disabled,
+.update-button:disabled {
   cursor: default;
   opacity: 0.6;
+}
+
+/* The update dialog borrows the settings pane's chrome; only its content differs. */
+.update-panel {
+  width: min(440px, 100%);
+}
+
+.update-footer {
+  justify-content: flex-end;
+}
+
+.update-message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.update-notes {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid #223247;
+  border-radius: 9px;
+  background: rgba(2, 6, 16, 0.8);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: var(--muted);
+}
+
+.update-progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.update-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 120ms linear;
 }

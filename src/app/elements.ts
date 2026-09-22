@@ -30,6 +30,16 @@ export type AppElements = {
   lagPillEl: HTMLSpanElement;
   marketStatePillEl: HTMLSpanElement;
   updatePillEl: HTMLButtonElement;
+  updateOverlayEl: HTMLDivElement;
+  updateTitleEl: HTMLHeadingElement;
+  updateMessageEl: HTMLParagraphElement;
+  updateProgressEl: HTMLDivElement;
+  updateProgressFillEl: HTMLDivElement;
+  updateNotesEl: HTMLDivElement;
+  updateFooterEl: HTMLElement;
+  updateCloseEl: HTMLButtonElement;
+  updateDismissEl: HTMLButtonElement;
+  updateActionEl: HTMLButtonElement;
   prefsOverlayEl: HTMLDivElement;
   prefsFormEl: HTMLFormElement;
   prefsCloseEl: HTMLButtonElement;
@@ -80,6 +90,16 @@ export function initElements(root: ParentNode = document): AppElements {
     lagPillEl: root.querySelector("#lag-pill") as HTMLSpanElement,
     marketStatePillEl: root.querySelector("#market-state-pill") as HTMLSpanElement,
     updatePillEl: root.querySelector("#update-pill") as HTMLButtonElement,
+    updateOverlayEl: root.querySelector("#update-overlay") as HTMLDivElement,
+    updateTitleEl: root.querySelector("#update-title") as HTMLHeadingElement,
+    updateMessageEl: root.querySelector("#update-message") as HTMLParagraphElement,
+    updateProgressEl: root.querySelector("#update-progress") as HTMLDivElement,
+    updateProgressFillEl: root.querySelector("#update-progress-fill") as HTMLDivElement,
+    updateNotesEl: root.querySelector("#update-notes") as HTMLDivElement,
+    updateFooterEl: root.querySelector("#update-footer") as HTMLElement,
+    updateCloseEl: root.querySelector("#update-close") as HTMLButtonElement,
+    updateDismissEl: root.querySelector("#update-dismiss") as HTMLButtonElement,
+    updateActionEl: root.querySelector("#update-action") as HTMLButtonElement,
     prefsOverlayEl: root.querySelector("#prefs-overlay") as HTMLDivElement,
     prefsFormEl: root.querySelector("#prefs-form") as HTMLFormElement,
     prefsCloseEl: root.querySelector("#prefs-close") as HTMLButtonElement,

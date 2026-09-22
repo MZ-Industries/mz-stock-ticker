@@ -33,7 +33,7 @@ import { loadProviderStatus } from "./provider";
 import { hideSearchResults, setupSymbolSearch } from "./search";
 import { debugLog, isApiCooldownActive, persistPrefs, state } from "./store";
 import { filterStudyMenu, initStudyMenu, renderControls, renderStats, syncStudyMenuState } from "./ui";
-import { initUpdater } from "./updater";
+import { initUpdater, isUpdateDialogOpen } from "./updater";
 import { getStudy } from "./studies";
 import { normalizeTicker } from "./utils";
 import { cycleWatchlistBadgeMode, renderWatchlistRows, setupWatchlistDragAndDrop } from "./watchlist";
@@ -119,7 +119,7 @@ export function registerGlobalEventHandlers(): void {
       return;
     }
 
-    if (isPreferencesOpen()) {
+    if (isPreferencesOpen() || isUpdateDialogOpen()) {
       return;
     }
 
