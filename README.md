@@ -4,16 +4,19 @@
 
 # MZ Stock Ticker
 
-**A fast, native stock dashboard for your desktop — styled after Apple Stocks.**
+**Open source native charting terminal. No account, no API key.**
 
-Live watchlist, candlestick charts, key statistics, and market news in a
+Starts where Apple Stocks stops: a live watchlist next to real charting — 47
+technical studies, candlesticks, key statistics, and market news — in a
 lightweight app built with Tauri, Rust, and TypeScript.
+Free for macOS, Windows, and Linux.
 
 [![Latest release](https://img.shields.io/github/v/release/MZ-Industries/mz-stock-ticker?style=flat-square)](https://github.com/MZ-Industries/mz-stock-ticker/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/MZ-Industries/mz-stock-ticker/total?style=flat-square)](https://github.com/MZ-Industries/mz-stock-ticker/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/MZ-Industries/mz-stock-ticker/ci.yml?style=flat-square&label=CI)](https://github.com/MZ-Industries/mz-stock-ticker/actions/workflows/ci.yml)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20·%20Windows%20·%20Linux-4c72b0?style=flat-square)](https://github.com/MZ-Industries/mz-stock-ticker/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
 [Features](#features) • [Download](#download) • [Tips](#tips) • [Configuration](#configuration) • [Development](#development) • [Data notes](#data-notes)
 
@@ -23,7 +26,7 @@ lightweight app built with Tauri, Rust, and TypeScript.
 
 </div>
 
-No account. No API key. Add your symbols and go.
+No account. No API key. No subscription. Add your symbols and go.
 
 ## Features
 
@@ -172,6 +175,10 @@ only if everything passes.
 - Intraday history is bounded by Yahoo's retention: 1m ≈ 30 days, 5m–30m ≈ 60
   days, hourly ≈ 2 years, daily unlimited. Quality and latency vary by symbol
   and session.
+
+## License
+
+[MIT](LICENSE) © Matt Sergeant
 
 > [!WARNING]
 > MZ Stock Ticker is for personal, informational use only. Nothing it displays
