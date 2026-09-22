@@ -111,6 +111,8 @@ export type ChartRenderRequest = {
 export type ChartController = {
   render: (request: ChartRenderRequest) => void;
   applyLiveBars: (bars: AggregateBar[]) => void;
+  /** Drops any manual zoom or axis drag and re-opens the default window. */
+  resetView: () => void;
   getVisibleLogicalRange: () => VisibleRange | null;
   /** Re-applies the chart stack's row sizes (after a splitter drag). */
   applyPaneLayout: () => void;
@@ -1083,27 +1085,56 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     }
   };
 
-  const restoreView = (): void => {
-    if (!priceChart) {
-      return;
+  /**
+   * Dragging the right-hand axis puts that price scale into manual mode, and
+   * lightweight-charts never takes it back out on its own. The stretched range
+   * then follows the chart into every other symbol, range and interval, and a
+   * few drags are enough to push it to a span so wide that the axis stops
+   * producing tick labels altogether. Every view reset hands the panes back to
+   * auto-scale, which is the only way out of that state.
+   */
+  const resetPriceScales = (): void => {
+    for (const chart of allCharts()) {
+      chart.priceScale("right").applyOptions({ autoScale: true });
     }
+  };
 
-    lastViewResetAtMs = Date.now();
-
+  /** The window a view opens on when nothing is being restored. */
+  const applyDefaultView = (): void => {
     if (defaultVisibleRange) {
       setRangeOnAllCharts(defaultVisibleRange);
-      return;
-    }
-
-    const restored = restorableRange(bars.length);
-    if (restored) {
-      setRangeOnAllCharts(restored);
       return;
     }
 
     for (const chart of allCharts()) {
       chart.timeScale().fitContent();
     }
+  };
+
+  /**
+   * `stored` replays the window this view was last left on, which is only the
+   * right answer for the first render of a session - it is what reopens the app
+   * where the user closed it. Picking a different symbol, range or interval is a
+   * request to see that slice of time whole, so it takes `default`: replaying a
+   * saved zoom there is what made "3M" open on a few days of the three months.
+   */
+  const restoreView = (mode: "stored" | "default"): void => {
+    if (!priceChart) {
+      return;
+    }
+
+    lastViewResetAtMs = Date.now();
+    resetPriceScales();
+
+    if (mode === "stored" && !defaultVisibleRange) {
+      const restored = restorableRange(bars.length);
+      if (restored) {
+        setRangeOnAllCharts(restored);
+        return;
+      }
+    }
+
+    applyDefaultView();
   };
 
   const render = (request: ChartRenderRequest): void => {
@@ -1152,7 +1183,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       // A periodic data refresh must leave the time scale exactly where the user
       // left it - that is what used to make the chart jump and rescale.
       resetKey = request.resetKey;
-      restoreView();
+      restoreView(firstRender ? "stored" : "default");
     }
 
     // A data refresh can change which dates the visible indices point at
@@ -1303,5 +1334,11 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     multiDayView = false;
   };
 
-  return { render, applyLiveBars, getVisibleLogicalRange, applyPaneLayout, dispose };
+  /** Back to the view this range opens on, with both scales auto again. */
+  const resetView = (): void => {
+    restoreView("default");
+    scheduleShading();
+  };
+
+  return { render, applyLiveBars, resetView, getVisibleLogicalRange, applyPaneLayout, dispose };
 }

@@ -13,7 +13,7 @@ import {
   selectTickerAndRefresh,
   startStream,
 } from "./actions";
-import { disposeCharts, getVisibleLogicalRange, renderCharts } from "./chartPanel";
+import { disposeCharts, getVisibleLogicalRange, renderCharts, resetChartView } from "./chartPanel";
 import {
   CANDLE_INTERVAL_OPTIONS,
   MAX_WATCHLIST_SYMBOLS,
@@ -139,6 +139,16 @@ export function registerGlobalEventHandlers(): void {
 
     event.preventDefault();
     selectTickerViaKeyboard(symbols[nextIndex]);
+  });
+
+  // The only way back from a zoom or a price-axis drag that has gone wrong.
+  // lightweight-charts resets an axis on its own double-click, but one pane at
+  // a time and only the axis under the pointer; this puts the whole stack back.
+  els.chartStackEl.addEventListener("dblclick", (event) => {
+    if ((event.target as HTMLElement).closest(".splitter")) {
+      return;
+    }
+    resetChartView();
   });
 
   els.rangeGroupEl.addEventListener("click", async (event) => {
