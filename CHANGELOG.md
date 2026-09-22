@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.4.0...v0.5.0) (2026-09-22)
+
+
+### Features
+
+* move "Check for Updates" into the application menu ([12bf6ef](https://github.com/MZ-Industries/mz-stock-ticker/commit/12bf6ef5615d12f9dcb72f72bb6bb2eaf41f617c))
+* settings pane for the endpoints and keys, replacing .env ([20a235b](https://github.com/MZ-Industries/mz-stock-ticker/commit/20a235b0be8b5bd0a510b81749f21d32f76c5133))
+
 ## [0.4.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.3.0...v0.4.0) (2026-09-02)
 
 
