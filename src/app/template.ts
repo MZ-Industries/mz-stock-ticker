@@ -61,6 +61,52 @@ export const APP_TEMPLATE = `
       </section>
     </section>
   </div>
+  <div class="prefs-overlay hidden" id="prefs-overlay">
+    <form class="prefs-panel" id="prefs-form" role="dialog" aria-modal="true" aria-labelledby="prefs-title">
+      <header class="prefs-header">
+        <h2 id="prefs-title">Settings</h2>
+        <button type="button" class="prefs-close" id="prefs-close" aria-label="Close settings">&times;</button>
+      </header>
+      <div class="prefs-body">
+        <label class="prefs-field">
+          <span class="prefs-label">Market data endpoint</span>
+          <input id="prefs-yahoo-base" type="text" spellcheck="false" autocomplete="off" placeholder="https://query1.finance.yahoo.com" />
+          <span class="prefs-hint">Quotes, charts, and sparklines.</span>
+        </label>
+        <label class="prefs-field">
+          <span class="prefs-label">News &amp; search endpoint</span>
+          <input id="prefs-yahoo-news-base" type="text" spellcheck="false" autocomplete="off" placeholder="https://query2.finance.yahoo.com" />
+          <span class="prefs-hint">Business news and symbol search.</span>
+        </label>
+        <label class="prefs-field">
+          <span class="prefs-label">Volume backfill API key</span>
+          <input id="prefs-backfill-key" type="password" spellcheck="false" autocomplete="off" placeholder="Off" />
+          <span class="prefs-hint">Optional. Fills in volume for candles Yahoo reports as zero, mostly pre- and post-market.</span>
+        </label>
+        <label class="prefs-field">
+          <span class="prefs-label">Volume backfill endpoint</span>
+          <input id="prefs-backfill-base" type="text" spellcheck="false" autocomplete="off" placeholder="https://api.massive.com" />
+          <span class="prefs-hint">Any Polygon-compatible aggregates API.</span>
+        </label>
+        <label class="prefs-field">
+          <span class="prefs-label">Live poll interval</span>
+          <input id="prefs-poll-ms" type="number" min="1000" step="1000" autocomplete="off" placeholder="Automatic" />
+          <span class="prefs-hint">Milliseconds between live updates. Blank follows the session &mdash; 15s in extended hours, 120s outside them.</span>
+        </label>
+        <label class="prefs-field prefs-field-check">
+          <input id="prefs-debug" type="checkbox" />
+          <span class="prefs-label">Write backend debug logs to stderr</span>
+        </label>
+      </div>
+      <footer class="prefs-footer">
+        <span class="prefs-status" id="prefs-status" role="status"></span>
+        <div class="prefs-actions">
+          <button type="button" class="prefs-button" id="prefs-cancel">Cancel</button>
+          <button type="submit" class="prefs-button primary" id="prefs-save">Save</button>
+        </div>
+      </footer>
+    </form>
+  </div>
   <section class="provider-toolbar status-line" id="provider-toolbar" aria-label="Data provider status">
     <div class="provider-summary">
       <span id="provider-pill" class="provider-pill">Provider: Yahoo</span>

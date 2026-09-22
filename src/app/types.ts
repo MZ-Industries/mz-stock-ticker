@@ -92,6 +92,17 @@ export type CandleIntervalOption = {
   timespan: "minute" | "hour";
 };
 
+/** Backend settings edited in the Preferences pane (mirrors `settings.rs`). */
+export type AppSettings = {
+  yahooBaseUrl: string;
+  yahooNewsBaseUrl: string;
+  backfillBaseUrl: string;
+  backfillApiKey: string;
+  /** Zero follows the session: 15s in extended hours, 120s outside them. */
+  livePollMs: number;
+  debugLogging: boolean;
+};
+
 export type AppPrefs = {
   ticker: string;
   rangeLabel: string;

@@ -33,9 +33,7 @@ pub(crate) fn stop_active_stream(stream_state: &StreamState) {
 }
 
 pub(crate) fn debug_enabled() -> bool {
-    std::env::var("MASSIVE_DEBUG")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+    settings::with(|settings| settings.debug_logging)
 }
 
 pub(crate) fn debug_log(message: &str) {
@@ -45,23 +43,23 @@ pub(crate) fn debug_log(message: &str) {
 }
 
 pub(crate) fn yahoo_base_url() -> String {
-    std::env::var("YAHOO_BASE_URL").unwrap_or_else(|_| "https://query1.finance.yahoo.com".to_string())
+    settings::with(|settings| settings.yahoo_base_url.clone())
 }
 
 pub(crate) fn yahoo_news_base_url() -> String {
-    std::env::var("YAHOO_NEWS_BASE_URL").unwrap_or_else(|_| "https://query2.finance.yahoo.com".to_string())
+    settings::with(|settings| settings.yahoo_news_base_url.clone())
 }
 
-pub(crate) fn massive_base_url() -> String {
-    std::env::var("MASSIVE_BASE_URL")
-        .or_else(|_| std::env::var("POLYGON_BASE_URL"))
-        .unwrap_or_else(|_| "https://api.massive.com".to_string())
+pub(crate) fn backfill_base_url() -> String {
+    settings::with(|settings| settings.backfill_base_url.clone())
 }
 
-pub(crate) fn massive_api_key() -> Option<String> {
-    std::env::var("MASSIVE_API_KEY")
-        .or_else(|_| std::env::var("POLYGON_API_KEY"))
-        .ok()
+/// `None` when no key is configured, which leaves the volume backfill off.
+pub(crate) fn backfill_api_key() -> Option<String> {
+    settings::with(|settings| {
+        let key = settings.backfill_api_key.clone();
+        (!key.is_empty()).then_some(key)
+    })
 }
 
 pub(crate) fn yahoo_client() -> Result<&'static Client, String> {
@@ -222,7 +220,7 @@ pub(crate) async fn fetch_massive_volume_overlay(
     from: &str,
     to: &str,
 ) -> Result<HashMap<i64, f64>, String> {
-    let Some(api_key) = massive_api_key() else {
+    let Some(api_key) = backfill_api_key() else {
         return Ok(HashMap::new());
     };
 
@@ -234,7 +232,7 @@ pub(crate) async fn fetch_massive_volume_overlay(
 
     let mut url = Url::parse(&format!(
         "{}/v2/aggs/ticker/{}/range/{}/{}/{}/{}",
-        massive_base_url(), ticker, multiplier, timespan, from, overlay_to
+        backfill_base_url(), ticker, multiplier, timespan, from, overlay_to
     ))
     .map_err(|err| format!("Bad Massive aggs URL: {}", err))?;
 
@@ -566,15 +564,12 @@ pub(crate) fn is_extended_session_now() -> bool {
 }
 
 pub(crate) fn live_poll_interval() -> Duration {
-    let configured = std::env::var("LIVE_POLL_MS")
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|value| *value >= 1_000);
+    let configured = settings::with(|settings| settings.live_poll_ms);
 
     match configured {
-        Some(ms) => Duration::from_millis(ms),
-        None if is_extended_session_now() => LIVE_POLL_ACTIVE,
-        None => LIVE_POLL_IDLE,
+        ms if ms > 0 => Duration::from_millis(ms),
+        _ if is_extended_session_now() => LIVE_POLL_ACTIVE,
+        _ => LIVE_POLL_IDLE,
     }
 }
 

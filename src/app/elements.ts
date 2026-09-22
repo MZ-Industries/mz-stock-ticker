@@ -30,6 +30,18 @@ export type AppElements = {
   lagPillEl: HTMLSpanElement;
   marketStatePillEl: HTMLSpanElement;
   updatePillEl: HTMLButtonElement;
+  prefsOverlayEl: HTMLDivElement;
+  prefsFormEl: HTMLFormElement;
+  prefsCloseEl: HTMLButtonElement;
+  prefsCancelEl: HTMLButtonElement;
+  prefsSaveEl: HTMLButtonElement;
+  prefsStatusEl: HTMLSpanElement;
+  prefsYahooBaseEl: HTMLInputElement;
+  prefsYahooNewsBaseEl: HTMLInputElement;
+  prefsBackfillKeyEl: HTMLInputElement;
+  prefsBackfillBaseEl: HTMLInputElement;
+  prefsPollMsEl: HTMLInputElement;
+  prefsDebugEl: HTMLInputElement;
 };
 
 /** Populated once by initElements() right after the template is injected. */
@@ -68,6 +80,18 @@ export function initElements(root: ParentNode = document): AppElements {
     lagPillEl: root.querySelector("#lag-pill") as HTMLSpanElement,
     marketStatePillEl: root.querySelector("#market-state-pill") as HTMLSpanElement,
     updatePillEl: root.querySelector("#update-pill") as HTMLButtonElement,
+    prefsOverlayEl: root.querySelector("#prefs-overlay") as HTMLDivElement,
+    prefsFormEl: root.querySelector("#prefs-form") as HTMLFormElement,
+    prefsCloseEl: root.querySelector("#prefs-close") as HTMLButtonElement,
+    prefsCancelEl: root.querySelector("#prefs-cancel") as HTMLButtonElement,
+    prefsSaveEl: root.querySelector("#prefs-save") as HTMLButtonElement,
+    prefsStatusEl: root.querySelector("#prefs-status") as HTMLSpanElement,
+    prefsYahooBaseEl: root.querySelector("#prefs-yahoo-base") as HTMLInputElement,
+    prefsYahooNewsBaseEl: root.querySelector("#prefs-yahoo-news-base") as HTMLInputElement,
+    prefsBackfillKeyEl: root.querySelector("#prefs-backfill-key") as HTMLInputElement,
+    prefsBackfillBaseEl: root.querySelector("#prefs-backfill-base") as HTMLInputElement,
+    prefsPollMsEl: root.querySelector("#prefs-poll-ms") as HTMLInputElement,
+    prefsDebugEl: root.querySelector("#prefs-debug") as HTMLInputElement,
   };
 
   return els;

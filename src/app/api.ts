@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AggregateBar,
+  AppSettings,
   LiveBarsEvent,
   NewsItem,
   ProviderStatus,
@@ -59,6 +60,20 @@ export function stopLiveStream(): Promise<void> {
 
 export function listenLiveBars(handler: (event: LiveBarsEvent) => void): Promise<UnlistenFn> {
   return listen<LiveBarsEvent>("live-bars", (event) => handler(event.payload));
+}
+
+export function getSettings(): Promise<AppSettings> {
+  return invoke<AppSettings>("get_settings");
+}
+
+/** Returns the settings as stored, with blanks and out-of-range values fixed up. */
+export function saveSettings(settings: AppSettings): Promise<AppSettings> {
+  return invoke<AppSettings>("save_settings", { settings });
+}
+
+/** Fired when "Settings…" is picked from the native menu. */
+export function listenMenuOpenPreferences(handler: () => void): Promise<UnlistenFn> {
+  return listen("menu:open-preferences", () => handler());
 }
 
 /** Mirrors the stored preference into the menu's automatic-check box. */

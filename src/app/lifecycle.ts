@@ -26,6 +26,7 @@ import {
 import { els } from "./elements";
 import { applyStoredPaneSizes, reorderWatchlistSymbols, setupSplitters } from "./layout";
 import { isCandleIntervalRelevant } from "./market";
+import { initPreferences, isPreferencesOpen } from "./preferences";
 import { ensureSelectedTicker, flushVisibleRange, initPrefs, persistWatchlistSymbols } from "./prefs";
 import { startRefreshProgressLoop, stopRefreshProgressLoop } from "./progress";
 import { loadProviderStatus } from "./provider";
@@ -115,6 +116,10 @@ export function registerGlobalEventHandlers(): void {
 
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+      return;
+    }
+
+    if (isPreferencesOpen()) {
       return;
     }
 
@@ -396,6 +401,7 @@ export async function bootstrapApp(): Promise<void> {
   }, NEWS_REFRESH_MS);
 
   scheduleAdaptiveBarsRefresh();
+  initPreferences();
   initUpdater();
 }
 
