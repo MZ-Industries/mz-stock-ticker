@@ -56,7 +56,7 @@ No account. No API key. No subscription. Add your symbols and go.
 - Resizable panes: sidebar width, price/volume split, and chart/news split
 - Everything persists between launches — ticker, range, chart type, enabled studies, pane sizes, visible range, and window position
 - Settings pane for the endpoints, the optional volume-backfill key, and the live poll cadence
-- Updates check themselves in the background and install on a click; "Check for Updates" sits in the app menu, and automatic checking can be turned off there
+- "Check for Updates" in the app menu opens a dialog with the result — the new version and its release notes, or confirmation that you are current — and installs from there; background checks stay quiet and raise a status-bar pill, and automatic checking can be turned off in the same menu
 
 ## Download
 

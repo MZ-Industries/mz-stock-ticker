@@ -107,6 +107,25 @@ export const APP_TEMPLATE = `
       </footer>
     </form>
   </div>
+  <div class="update-overlay hidden" id="update-overlay">
+    <div class="update-panel" role="dialog" aria-modal="true" aria-labelledby="update-title">
+      <header class="update-header">
+        <h2 id="update-title">Software Update</h2>
+        <button type="button" class="update-close" id="update-close" aria-label="Close">&times;</button>
+      </header>
+      <div class="update-body">
+        <p class="update-message" id="update-message" role="status"></p>
+        <div class="update-progress hidden" id="update-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+          <div class="update-progress-fill" id="update-progress-fill"></div>
+        </div>
+        <div class="update-notes hidden" id="update-notes"></div>
+      </div>
+      <footer class="update-footer" id="update-footer">
+        <button type="button" class="update-button" id="update-dismiss">Close</button>
+        <button type="button" class="update-button primary hidden" id="update-action"></button>
+      </footer>
+    </div>
+  </div>
   <section class="provider-toolbar status-line" id="provider-toolbar" aria-label="Data provider status">
     <div class="provider-summary">
       <span id="provider-pill" class="provider-pill">Provider: Yahoo</span>
