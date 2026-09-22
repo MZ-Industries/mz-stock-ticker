@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.5.0...v0.5.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* line up study panes with the price chart ([8a87de9](https://github.com/MZ-Industries/mz-stock-ticker/commit/8a87de99bb01ba594abcab9f5dc4acb37d27970f))
+
 ## [0.5.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.4.0...v0.5.0) (2026-09-22)
 
 
