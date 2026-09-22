@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.2](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.5.1...v0.5.2) (2026-09-22)
+
+
+### Bug Fixes
+
+* restore the chart's default view and price scale ([46caa8b](https://github.com/MZ-Industries/mz-stock-ticker/commit/46caa8b083c60e9ff8470caf7bd2c253563821a9))
+* restore the chart's default view and price scale ([19ab325](https://github.com/MZ-Industries/mz-stock-ticker/commit/19ab3259605b992e8c0ef6d95be34b8816231607))
+
 ## [0.5.1](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.5.0...v0.5.1) (2026-09-22)
 
 
