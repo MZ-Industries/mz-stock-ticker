@@ -31,12 +31,24 @@ export const APP_TEMPLATE = `
         <div class="range-group" id="range-group"></div>
         <div class="interval-group hidden" id="interval-group"></div>
         <div class="ma-group" id="ma-group"></div>
-        <div class="type-group" id="type-group"></div>
+        <div class="chart-type-switch" id="type-group" role="group" aria-label="Chart type"></div>
+        <div class="study-picker" id="study-picker">
+          <button type="button" class="pill study-toggle" id="study-toggle" aria-haspopup="dialog" aria-expanded="false">Studies</button>
+          <div class="study-menu hidden" id="study-menu" role="dialog" aria-label="Chart studies">
+            <div class="study-menu-header">
+              <input id="study-filter" type="text" class="study-filter" placeholder="Filter studies" aria-label="Filter studies" autocomplete="off" spellcheck="false" />
+              <button type="button" class="study-clear" data-study-clear>Clear</button>
+            </div>
+            <div class="study-list" id="study-list" role="group"></div>
+          </div>
+        </div>
       </div>
       <div class="chart-stack" id="chart-stack">
         <div class="price-chart" id="price-chart"></div>
         <div class="splitter horizontal" id="volume-splitter" role="separator" aria-orientation="horizontal"></div>
-        <div class="volume-chart" id="volume-chart"></div>
+        <div class="lower-panes" id="lower-panes">
+          <div class="volume-chart" id="volume-chart"></div>
+        </div>
       </div>
       <div class="stats-strip" id="stats-strip" aria-label="Key statistics"></div>
       <div class="splitter horizontal" id="news-splitter" role="separator" aria-orientation="horizontal"></div>

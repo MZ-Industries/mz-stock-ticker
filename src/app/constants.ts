@@ -42,7 +42,11 @@ export const CANDLE_INTERVAL_OPTIONS: CandleIntervalOption[] = [
   { key: "90m", label: "90m", multiplier: 90, timespan: "minute" },
 ];
 
-export const CHART_TYPES: ChartType[] = ["line", "area", "baseline", "candlestick", "bar"];
+export const CHART_TYPES: ChartType[] = ["candlestick", "line"];
+export const CHART_TYPE_LABELS: Record<ChartType, string> = {
+  candlestick: "Candles",
+  line: "Line",
+};
 export const MOVING_AVERAGE_PERIOD_OPTIONS = [20, 50, 200] as const;
 
 export const RIGHT_SCALE_WIDTH_PX = 72;
@@ -71,6 +75,7 @@ export const defaultPrefs: AppPrefs = {
   chartType: "candlestick",
   candleIntervalKey: "5m",
   movingAveragePeriods: [200],
+  studyKeys: [],
   sidebarWidth: 280,
   pricePaneHeight: 0,
   chartAreaHeight: 0,

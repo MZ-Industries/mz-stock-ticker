@@ -29,8 +29,9 @@ No account. No API key. Add your symbols and go.
 
 **Charts**
 
-- Five chart modes — candlestick, line, area, baseline, and bar — with a crosshair OHLC/volume legend
+- Candle/line switch with a crosshair OHLC/volume legend
 - Moving-average overlays (20 / 50 / 200) and a dedicated volume pane
+- 47 technical studies from a filterable checklist — RSI, MACD, Stochastics, ADX/DMS, Bollinger Bands, Ichimoku, VWAP and more. Oscillators stack in their own panes under the volume chart; overlays draw on the price chart, each with its own crosshair readout
 - Range presets from 1D to ALL, with infinite scroll-back that fetches older history as you approach it
 - The 1D view holds several sessions: it opens on the latest one (pre-market included), scrolling left reveals prior days, and non-regular hours are shaded per session
 - Previous-close reference line and a live trailing candle driven by a background poller
@@ -50,7 +51,7 @@ No account. No API key. Add your symbols and go.
 **Quality of life**
 
 - Resizable panes: sidebar width, price/volume split, and chart/news split
-- Everything persists between launches — ticker, range, chart type, pane sizes, visible range, and window position
+- Everything persists between launches — ticker, range, chart type, enabled studies, pane sizes, visible range, and window position
 
 ## Download
 

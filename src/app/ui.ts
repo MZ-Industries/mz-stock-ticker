@@ -1,5 +1,6 @@
 import {
   CANDLE_INTERVAL_OPTIONS,
+  CHART_TYPE_LABELS,
   CHART_TYPES,
   MOVING_AVERAGE_PERIOD_OPTIONS,
   RANGES,
@@ -7,6 +8,7 @@ import {
 import { els } from "./elements";
 import { getExtendedStripFromBars, isCandleIntervalRelevant } from "./market";
 import { state } from "./store";
+import { STUDIES } from "./studies";
 import { escapeHtml, fmtCompact, fmtNumber, fmtPct, formatRelativeTime } from "./utils";
 import type { NewsItem } from "./types";
 
@@ -129,10 +131,55 @@ export function renderControls(): void {
     return `<button class="pill ${active}" data-ma-period="${period}">MA ${period}</button>`;
   }).join("");
 
+  const activeTypeIndex = Math.max(0, CHART_TYPES.indexOf(state.selectedChartType));
+  els.typeGroupEl.style.setProperty("--switch-index", String(activeTypeIndex));
   els.typeGroupEl.innerHTML = CHART_TYPES.map((type) => {
-    const active = type === state.selectedChartType ? "active" : "";
-    return `<button class="pill ${active}" data-type="${type}">${type}</button>`;
+    const active = type === state.selectedChartType;
+    return `<button type="button" class="switch-option${active ? " active" : ""}" data-type="${type}" aria-pressed="${active}">${CHART_TYPE_LABELS[type]}</button>`;
   }).join("");
+
+  syncStudyMenuState();
+}
+
+/**
+ * Builds the study checklist once. The list never changes, so later renders
+ * only re-sync the checkboxes - rebuilding would wipe the filter the user is
+ * typing and drop focus mid-keystroke.
+ */
+export function initStudyMenu(): void {
+  els.studyListEl.innerHTML = STUDIES.map((study) => `
+    <label class="study-item" data-study-label="${escapeHtml(study.label.toLowerCase())}">
+      <input type="checkbox" data-study-key="${escapeHtml(study.key)}" />
+      <span>${escapeHtml(study.label)}</span>
+      <span class="study-placement">${study.placement === "price" ? "overlay" : "pane"}</span>
+    </label>
+  `).join("");
+
+  syncStudyMenuState();
+}
+
+/** Reflects the enabled studies in the checkboxes and the toggle's label. */
+export function syncStudyMenuState(): void {
+  const enabled = new Set(state.selectedStudyKeys);
+
+  for (const input of els.studyListEl.querySelectorAll("[data-study-key]")) {
+    const checkbox = input as HTMLInputElement;
+    checkbox.checked = enabled.has(checkbox.dataset.studyKey ?? "");
+  }
+
+  els.studyToggleEl.textContent = enabled.size > 0 ? `Studies (${enabled.size})` : "Studies";
+  els.studyToggleEl.classList.toggle("active", enabled.size > 0);
+}
+
+/** Hides study rows that do not match the filter box. */
+export function filterStudyMenu(query: string): void {
+  const needle = query.trim().toLowerCase();
+
+  for (const node of els.studyListEl.querySelectorAll(".study-item")) {
+    const item = node as HTMLElement;
+    const label = item.dataset.studyLabel ?? "";
+    item.classList.toggle("hidden", needle.length > 0 && !label.includes(needle));
+  }
 }
 
 const MARKET_STATE_LABELS: Record<string, string> = {

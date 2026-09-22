@@ -1,4 +1,4 @@
-export type ChartType = "line" | "area" | "baseline" | "candlestick" | "bar";
+export type ChartType = "candlestick" | "line";
 
 export type AggregateBar = {
   t: number;
@@ -98,6 +98,8 @@ export type AppPrefs = {
   chartType: ChartType;
   candleIntervalKey?: string;
   movingAveragePeriods?: number[];
+  /** Enabled study keys, in the order they were turned on. */
+  studyKeys?: string[];
   watchlistSymbols?: string[];
   watchlistBadgeMode?: "percent" | "delta";
   visibleRangesByViewKey?: Record<string, { from: number; to: number }>;

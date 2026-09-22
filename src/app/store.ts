@@ -22,6 +22,7 @@ export const state = {
   selectedChartType: "candlestick" as ChartType,
   selectedCandleIntervalKey: "5m",
   selectedMovingAveragePeriods: [...(defaultPrefs.movingAveragePeriods ?? [])],
+  selectedStudyKeys: [] as string[],
   watchlistSymbols: [...DEFAULT_WATCHLIST],
   latestBars: [] as AggregateBar[],
   activeSessionDate: null as string | null,

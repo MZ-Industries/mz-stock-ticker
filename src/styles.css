@@ -387,14 +387,19 @@ p {
   background: rgba(148, 163, 184, 0.35);
 }
 
+/*
+ * A utility that has to beat any component rule further down the sheet, several
+ * of which set their own `display` at the same specificity.
+ */
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 .controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 10px 20px 12px;
 }
@@ -506,7 +511,7 @@ p {
 .chart-stack {
   --price-pane-height: 68%;
   display: grid;
-  grid-template-rows: var(--price-pane-height) 8px 1fr;
+  grid-template-rows: var(--price-pane-height) 8px minmax(0, 1fr);
   min-height: 0;
   margin: 0 20px;
   border: 1px solid var(--border);
@@ -554,6 +559,200 @@ p {
 
 .chart-legend .down {
   color: var(--down);
+}
+
+/* Chart type: a two-position switch with a sliding thumb. */
+.chart-type-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border: 1px solid #223247;
+  border-radius: 99px;
+  background: rgba(8, 13, 24, 0.7);
+}
+
+.chart-type-switch::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  border-radius: 99px;
+  background: var(--accent);
+  transform: translateX(calc(var(--switch-index, 0) * 100%));
+  transition: transform 160ms ease;
+}
+
+.switch-option {
+  position: relative;
+  z-index: 1;
+  min-width: 76px;
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 99px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.switch-option.active {
+  color: #042124;
+}
+
+/* Studies dropdown. */
+.study-picker {
+  position: relative;
+}
+
+.study-toggle::after {
+  content: "";
+  display: inline-block;
+  margin-left: 7px;
+  border: 4px solid transparent;
+  border-top-color: currentColor;
+  transform: translateY(2px);
+}
+
+.study-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 310px;
+  max-height: min(430px, 56vh);
+  overflow: hidden;
+  border: 1px solid #223247;
+  border-radius: 12px;
+  background: rgba(8, 13, 24, 0.97);
+  box-shadow: 0 18px 40px rgba(2, 6, 16, 0.6);
+  backdrop-filter: blur(10px);
+}
+
+.study-menu-header {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.study-filter {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid #223247;
+  border-radius: 8px;
+  background: rgba(2, 6, 16, 0.8);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.study-filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.study-clear {
+  border: 1px solid #223247;
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.study-clear:hover {
+  border-color: rgba(248, 113, 113, 0.5);
+  color: #fca5a5;
+}
+
+.study-list {
+  padding: 6px;
+  overflow-y: auto;
+}
+
+.study-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.study-item:hover {
+  background: rgba(45, 212, 191, 0.1);
+}
+
+.study-item input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.study-item > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+}
+
+.study-placement {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/*
+ * Volume plus one row per study pane. Rows share the strip evenly until they
+ * would drop below a readable height, and the strip scrolls after that rather
+ * than squeezing every pane into a few pixels.
+ */
+.lower-panes {
+  display: grid;
+  grid-auto-rows: minmax(84px, 1fr);
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.study-chart {
+  position: relative;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+
+.overlay-legend {
+  top: 30px;
+  max-height: calc(100% - 44px);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.study-legend-row {
+  display: flex;
+  gap: 8px;
+}
+
+.study-name {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .stats-strip {

@@ -31,8 +31,9 @@ import { startRefreshProgressLoop, stopRefreshProgressLoop } from "./progress";
 import { loadProviderStatus } from "./provider";
 import { hideSearchResults, setupSymbolSearch } from "./search";
 import { debugLog, isApiCooldownActive, persistPrefs, state } from "./store";
-import { renderControls, renderStats } from "./ui";
+import { filterStudyMenu, initStudyMenu, renderControls, renderStats, syncStudyMenuState } from "./ui";
 import { initUpdater } from "./updater";
+import { getStudy } from "./studies";
 import { normalizeTicker } from "./utils";
 import { cycleWatchlistBadgeMode, renderWatchlistRows, setupWatchlistDragAndDrop } from "./watchlist";
 import type { ChartType } from "./types";
@@ -49,6 +50,25 @@ function addSymbolToWatchlist(symbol: string): void {
 function scrollSelectedRowIntoView(): void {
   const row = els.watchlistListEl.querySelector(".watch-row.selected");
   row?.scrollIntoView({ block: "nearest" });
+}
+
+function setStudyMenuOpen(open: boolean): void {
+  els.studyMenuEl.classList.toggle("hidden", !open);
+  els.studyToggleEl.setAttribute("aria-expanded", String(open));
+
+  if (open) {
+    els.studyFilterEl.focus();
+    els.studyFilterEl.select();
+  }
+}
+
+/** Single path for changing the enabled studies: persist, re-sync, redraw. */
+function setSelectedStudies(keys: string[]): void {
+  state.selectedStudyKeys = keys;
+  state.prefs.studyKeys = [...keys];
+  persistPrefs();
+  syncStudyMenuState();
+  renderCharts();
 }
 
 let keyboardRefreshTimer: number | null = null;
@@ -201,6 +221,48 @@ export function registerGlobalEventHandlers(): void {
     renderCharts();
   });
 
+  els.studyToggleEl.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setStudyMenuOpen(els.studyMenuEl.classList.contains("hidden"));
+  });
+
+  // Clicks inside the menu must not reach the close-on-outside-click handler.
+  els.studyMenuEl.addEventListener("click", (event) => {
+    event.stopPropagation();
+
+    if ((event.target as HTMLElement).closest("[data-study-clear]")) {
+      setSelectedStudies([]);
+    }
+  });
+
+  els.studyMenuEl.addEventListener("change", (event) => {
+    const checkbox = (event.target as HTMLElement).closest("[data-study-key]") as HTMLInputElement | null;
+    const key = checkbox?.dataset.studyKey;
+    if (!checkbox || !key || !getStudy(key)) {
+      return;
+    }
+
+    // Newly enabled studies go to the end, so their panes stack in the order
+    // the user turned them on.
+    setSelectedStudies(
+      checkbox.checked
+        ? [...state.selectedStudyKeys.filter((item) => item !== key), key]
+        : state.selectedStudyKeys.filter((item) => item !== key),
+    );
+  });
+
+  els.studyFilterEl.addEventListener("input", () => {
+    filterStudyMenu(els.studyFilterEl.value);
+  });
+
+  document.addEventListener("click", () => setStudyMenuOpen(false));
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      setStudyMenuOpen(false);
+    }
+  });
+
   els.newsGridEl.addEventListener("click", (event) => {
     const card = (event.target as HTMLElement).closest("[data-url]") as HTMLElement | null;
     const url = card?.dataset.url;
@@ -284,6 +346,7 @@ export async function bootstrapApp(): Promise<void> {
 
   renderWatchlistRows();
   applyStoredPaneSizes();
+  initStudyMenu();
   renderControls();
   setupSplitters();
 

@@ -30,7 +30,7 @@ function bar(t: number): AggregateBar {
 describe("isCandleIntervalRelevant", () => {
   it("only applies to OHLC chart types on minute-based ranges", () => {
     expect(isCandleIntervalRelevant("candlestick", preset("1D"))).toBe(true);
-    expect(isCandleIntervalRelevant("bar", preset("1W"))).toBe(true);
+    expect(isCandleIntervalRelevant("candlestick", preset("1W"))).toBe(true);
     expect(isCandleIntervalRelevant("line", preset("1D"))).toBe(false);
     expect(isCandleIntervalRelevant("candlestick", preset("1Y"))).toBe(false);
   });

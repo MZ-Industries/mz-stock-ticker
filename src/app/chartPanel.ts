@@ -15,6 +15,8 @@ export type ChartPanelOptions = {
 
 export function initChartPanel(options: ChartPanelOptions = {}): void {
   controller = createChartController({
+    stackContainer: els.chartStackEl,
+    lowerPanesContainer: els.lowerPanesEl,
     priceContainer: els.priceChartEl,
     volumeContainer: els.volumeChartEl,
     rightScaleWidthPx: RIGHT_SCALE_WIDTH_PX,
@@ -27,6 +29,7 @@ export function initChartPanel(options: ChartPanelOptions = {}): void {
       }),
     clearSessionShading,
     getStoredVisibleRange,
+    getPricePaneRatio: () => state.prefs.pricePaneHeight,
     onVisibleRangeChange: (viewKey, range) => {
       // 1D always opens on the latest session, so persisting its zoom would
       // only replay a stale window over a series whose length keeps changing.
@@ -104,7 +107,9 @@ export function renderCharts(prependedBars?: number): void {
     bars: state.latestBars,
     chartType: state.selectedChartType,
     timespan: currentAggregationPreset().timespan,
+    multiplier: currentAggregationPreset().multiplier,
     movingAveragePeriods: state.selectedMovingAveragePeriods,
+    studyKeys: state.selectedStudyKeys,
     previousClose: previousCloseForChart(),
     defaultVisibleRange: defaultViewForOneDay(),
     prependedBars,
@@ -115,6 +120,11 @@ export function renderCharts(prependedBars?: number): void {
 
 export function pushLiveBars(bars: AggregateBar[]): void {
   controller?.applyLiveBars(bars);
+}
+
+/** Re-applies the chart stack's row sizes, e.g. after a splitter drag. */
+export function applyChartPaneLayout(): void {
+  controller?.applyPaneLayout();
 }
 
 export function getVisibleLogicalRange(): VisibleRange | null {

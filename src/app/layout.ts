@@ -4,6 +4,7 @@ import {
   MIN_CHART_AREA_RATIO,
   MIN_PRICE_PANE_RATIO,
 } from "./constants";
+import { applyChartPaneLayout } from "./chartPanel";
 import { persistPrefs, state } from "./store";
 import { clamp, normalizeStoredRatio } from "./utils";
 
@@ -81,6 +82,9 @@ export function setupSplitters(): void {
       const ratio = clamp(MIN_PRICE_PANE_RATIO, MAX_PRICE_PANE_RATIO, priceHeight / Math.max(1, rect.height));
       chartStack.style.setProperty("--price-pane-height", `${(ratio * 100).toFixed(3)}%`);
       prefs.pricePaneHeight = ratio;
+      // The chart stack sizes its rows in JS, because the number of study panes
+      // decides how much room the price pane may actually claim.
+      applyChartPaneLayout();
       persistPrefs();
     }),
   );

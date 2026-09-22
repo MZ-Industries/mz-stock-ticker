@@ -20,7 +20,7 @@ export function isCandleIntervalRelevant(
   selectedChartType: ChartType,
   selectedRange: RangePreset,
 ): boolean {
-  const supportsType = selectedChartType === "candlestick" || selectedChartType === "bar";
+  const supportsType = selectedChartType === "candlestick";
   const supportsRange = selectedRange.timespan === "minute";
   return supportsType && supportsRange;
 }

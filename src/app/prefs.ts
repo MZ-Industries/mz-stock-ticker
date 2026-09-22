@@ -10,6 +10,7 @@ import {
   WATCHLIST_STORAGE_KEY,
 } from "./constants";
 import { currentChartViewKey, persistPrefs, state } from "./store";
+import { normalizeStudyKeys } from "./studies";
 import {
   normalizeMovingAveragePeriods,
   normalizeVisibleRangesByViewKey,
@@ -56,6 +57,8 @@ export async function initPrefs(): Promise<void> {
     defaultPrefs.movingAveragePeriods ?? [],
   );
   prefs.movingAveragePeriods = [...state.selectedMovingAveragePeriods];
+  state.selectedStudyKeys = normalizeStudyKeys(prefs.studyKeys);
+  prefs.studyKeys = [...state.selectedStudyKeys];
   state.selectedCandleIntervalKey =
     prefs.candleIntervalKey && CANDLE_INTERVAL_OPTIONS.some((item) => item.key === prefs.candleIntervalKey)
       ? prefs.candleIntervalKey
