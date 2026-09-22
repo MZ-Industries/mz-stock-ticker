@@ -18,7 +18,7 @@ lightweight app built with Tauri, Rust, and TypeScript.
 [Features](#features) • [Download](#download) • [Tips](#tips) • [Configuration](#configuration) • [Development](#development) • [Data notes](#data-notes)
 
 <a href="https://github.com/MZ-Industries/mz-stock-ticker/releases/latest">
-  <img src="docs/screenshot-main.png" alt="MZ Stock Ticker showing a candlestick chart with moving averages, a live watchlist with sparklines, key statistics, and business news" width="92%" />
+  <img src="docs/screenshot-main.png" alt="MZ Stock Ticker showing a candlestick chart with moving averages and an RSI pane, a live watchlist with sparklines, key statistics, and business news" width="92%" />
 </a>
 
 </div>
@@ -52,6 +52,8 @@ No account. No API key. Add your symbols and go.
 
 - Resizable panes: sidebar width, price/volume split, and chart/news split
 - Everything persists between launches — ticker, range, chart type, enabled studies, pane sizes, visible range, and window position
+- Settings pane for the endpoints, the optional volume-backfill key, and the live poll cadence
+- Updates check themselves in the background and install on a click; "Check for Updates" sits in the app menu, and automatic checking can be turned off there
 
 ## Download
 
@@ -90,19 +92,27 @@ Grab the latest build for your platform from the
 
 ## Configuration
 
-The app works out of the box with no configuration. Power users can tweak it
-through environment variables (in development, a `.env` file in the project
-root is loaded automatically — see [`.env.example`](.env.example)). All are
-optional:
+The app works out of the box, with no account and no API key. Everything below
+is optional and lives in **Settings** — <kbd>⌘</kbd><kbd>,</kbd> or the
+application menu on macOS, **Edit → Settings** on Windows and Linux.
 
-| Variable                                | Default                            | Purpose                                                                                        |
-| --------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `YAHOO_BASE_URL`                        | `https://query1.finance.yahoo.com` | Override the market-data endpoint                                                              |
-| `YAHOO_NEWS_BASE_URL`                   | `https://query2.finance.yahoo.com` | Override the news endpoint                                                                     |
-| `MASSIVE_API_KEY` / `POLYGON_API_KEY`   | —                                  | Enables volume backfill for candles Yahoo reports with zero volume (mostly pre/post market)    |
-| `MASSIVE_BASE_URL` / `POLYGON_BASE_URL` | `https://api.massive.com`          | Aggregates API used for the volume backfill                                                    |
-| `LIVE_POLL_MS`                          | 15s in extended hours, else 120s   | Live poll interval override (minimum 1000)                                                     |
-| `MASSIVE_DEBUG`                         | off                                | `true` enables backend debug logs                                                              |
+<div align="center">
+  <img src="docs/screenshot-settings.png" alt="The Settings pane showing the market data, news, and volume backfill endpoints, the backfill API key, and the live poll interval" width="72%" />
+</div>
+
+| Setting                    | Default                            | Purpose                                                                                              |
+| -------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Market data endpoint       | `https://query1.finance.yahoo.com` | Quotes, charts, and sparklines                                                                         |
+| News & search endpoint     | `https://query2.finance.yahoo.com` | Business news and symbol search                                                                        |
+| Volume backfill API key    | off                                | Fills in volume for candles Yahoo reports as zero, mostly pre- and post-market                          |
+| Volume backfill endpoint   | `https://api.massive.com`          | Any Polygon-compatible aggregates API, used for that backfill                                          |
+| Live poll interval         | automatic                          | Milliseconds between live updates. Blank follows the session — 15s in extended hours, 120s outside them |
+| Backend debug logs         | off                                | Writes backend request logs to stderr                                                                  |
+
+Saving takes effect on the next request — nothing here needs a restart. A blank
+endpoint falls back to its default, and a poll interval under 1000ms goes back
+to automatic. The values are stored in `settings.json` beside your dashboard
+preferences (`~/Library/Application Support/com.matt.mz-stock-ticker` on macOS).
 
 ## Development
 
@@ -131,10 +141,11 @@ cd src-tauri && cargo test            # backend tests
 The TypeScript frontend (Vite + [lightweight-charts](https://github.com/tradingview/lightweight-charts))
 talks to a Rust backend over Tauri commands: `get_provider_status`,
 `fetch_aggregates`, `fetch_snapshots`, `fetch_sparklines`, `fetch_news`,
-`fetch_symbol_detail`, `search_symbols`, and `start_live_stream` /
-`stop_live_stream`. The live stream republishes Yahoo's 1-minute bars as
+`fetch_symbol_detail`, `search_symbols`, `get_settings` / `save_settings`, and
+`start_live_stream` / `stop_live_stream`. The live stream republishes Yahoo's 1-minute bars as
 `live-bars` events carrying the freshly polled candle tail. Dashboard
-preferences persist via the Tauri Store plugin; window geometry via
+preferences and the Settings pane both persist via the Tauri Store plugin
+(`ui-preferences.json` and `settings.json`); window geometry via
 tauri-plugin-window-state.
 
 Chart scrolling follows real time only while the newest candle is on screen
