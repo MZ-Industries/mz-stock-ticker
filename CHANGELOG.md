@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.5.3...v0.6.0) (2026-09-23)
+
+
+### Features
+
+* draw horizontal and vertical lines on the chart ([391a300](https://github.com/MZ-Industries/mz-stock-ticker/commit/391a3005a2eeec6ae1f5619b3e9925cffe7ca0a1))
+
 ## [0.5.3](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.5.2...v0.5.3) (2026-09-22)
 
 
