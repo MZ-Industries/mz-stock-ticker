@@ -1,5 +1,6 @@
 import {
   CandlestickSeries,
+  CrosshairMode,
   HistogramSeries,
   LineSeries,
   LineStyle,
@@ -8,6 +9,7 @@ import {
   type IPriceLine,
   type ISeriesApi,
   type LineWidth,
+  type Logical,
   type MouseEventParams,
   type SeriesType,
   type TickMarkType,
@@ -16,7 +18,7 @@ import {
 } from "lightweight-charts";
 import { clamp, fmtCompact, fmtNumber, formatAxisTime, formatTooltipTime, getNyParts } from "./utils";
 import { getStudy, type StudyPlot, type StudyResult } from "./studies";
-import type { AggregateBar, ChartType, RangePreset } from "./types";
+import type { AggregateBar, ChartLine, ChartLineAnchor, ChartLineKind, ChartType, RangePreset } from "./types";
 
 export type VisibleRange = { from: number; to: number };
 
@@ -58,6 +60,9 @@ const SPLITTER_HEIGHT_PX = 8;
  */
 const MIN_LOWER_PANE_PX = 84;
 
+/** How close a right-click has to land to a drawn line to pick it. */
+const LINE_HIT_TOLERANCE_PX = 5;
+
 export type ChartControllerDeps = {
   stackContainer: HTMLDivElement;
   /** Scrolling strip that holds the volume chart and every study pane. */
@@ -73,6 +78,8 @@ export type ChartControllerDeps = {
   getPricePaneRatio: () => number;
   /** Fired when the user scrolls close to the oldest loaded bar. */
   onNeedOlderData?: () => void;
+  /** Fired when a click lands while a line is being placed. */
+  onLinePlaced?: (anchor: ChartLineAnchor) => void;
 };
 
 export type ChartRenderRequest = {
@@ -85,6 +92,8 @@ export type ChartRenderRequest = {
   studyKeys: string[];
   /** Official previous close; drawn as a dashed reference line when set. */
   previousClose: number | null;
+  /** User-drawn lines for the symbol these bars belong to. */
+  lines: ChartLine[];
   /**
    * Initial window to show when no better view applies (e.g. 1D shows the
    * latest session even though the series holds several days). When set it
@@ -116,6 +125,12 @@ export type ChartController = {
   getVisibleLogicalRange: () => VisibleRange | null;
   /** Re-applies the chart stack's row sizes (after a splitter drag). */
   applyPaneLayout: () => void;
+  setLines: (lines: ChartLine[]) => void;
+  /** The next click on the chart drops a line of this kind. */
+  beginLinePlacement: (kind: ChartLineKind) => void;
+  cancelLinePlacement: () => void;
+  /** Id of the drawn line under a viewport point, if any. */
+  lineAt: (clientX: number, clientY: number) => string | null;
   dispose: () => void;
 };
 
@@ -143,6 +158,34 @@ function usesOhlcData(chartType: ChartType): boolean {
 
 function toSeconds(bar: AggregateBar): UTCTimestamp {
   return Math.floor(bar.t / 1000) as UTCTimestamp;
+}
+
+/**
+ * The bar a moment falls in, so a line drawn on one interval lands on the
+ * matching candle of another. Null when the moment is outside the loaded bars.
+ */
+function barIndexAtTime(bars: AggregateBar[], timeMs: number): number | null {
+  if (bars.length === 0 || timeMs < bars[0].t) {
+    return null;
+  }
+
+  let low = 0;
+  let high = bars.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (bars[mid].t <= timeMs) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  const last = bars.length - 1;
+  if (low === last && last > 0 && timeMs - bars[last].t > bars[last].t - bars[last - 1].t) {
+    return null;
+  }
+
+  return low;
 }
 
 function volumeColor(bar: AggregateBar): string {
@@ -307,7 +350,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   let viewKey = "";
   let resetKey: string | null = null;
   let newestSeriesTime: UTCTimestamp | null = null;
-  let shadingFrame: number | null = null;
+  let overlayFrame: number | null = null;
   let previousClose: number | null = null;
   let previousCloseLine: IPriceLine | null = null;
   let legendEl: HTMLDivElement | null = null;
@@ -315,6 +358,11 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   let defaultVisibleRange: VisibleRange | null = null;
   let lastViewResetAtMs = 0;
   let multiDayView = false;
+  let lines: ChartLine[] = [];
+  /** Price lines backing the horizontal drawings; they die with `priceSeries`. */
+  let horizontalLineHandles: IPriceLine[] = [];
+  let placingKind: ChartLineKind | null = null;
+  let crosshairModeBeforePlacing: CrosshairMode | null = null;
 
   const allCharts = (): IChartApi[] => {
     const charts: IChartApi[] = [];
@@ -472,13 +520,13 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     }
   };
 
-  const scheduleShading = (): void => {
-    if (shadingFrame !== null || !priceChart) {
+  const scheduleOverlays = (): void => {
+    if (overlayFrame !== null || !priceChart) {
       return;
     }
 
-    shadingFrame = window.requestAnimationFrame(() => {
-      shadingFrame = null;
+    overlayFrame = window.requestAnimationFrame(() => {
+      overlayFrame = null;
       if (!priceChart) {
         return;
       }
@@ -489,7 +537,195 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       for (const pane of studyPanes) {
         renderSessionShading(pane.chart, pane.container);
       }
+      for (const { chart, container } of allPanes()) {
+        renderVerticalLines(chart, container);
+      }
     });
+  };
+
+  const allPanes = (): Array<{ chart: IChartApi; container: HTMLDivElement }> => {
+    const panes: Array<{ chart: IChartApi; container: HTMLDivElement }> = [];
+    if (priceChart) {
+      panes.push({ chart: priceChart, container: priceContainer });
+    }
+    if (volumeChart) {
+      panes.push({ chart: volumeChart, container: volumeContainer });
+    }
+    for (const pane of studyPanes) {
+      panes.push({ chart: pane.chart, container: pane.container });
+    }
+    return panes;
+  };
+
+  /**
+   * Width of a pane's plot area. Not `timeScale().width()`: that reads zero on
+   * every pane whose time axis is hidden, which is all but the bottom one.
+   */
+  const plotWidth = (chart: IChartApi, container: HTMLDivElement): number =>
+    container.clientWidth - chart.priceScale("right").width();
+
+  /**
+   * Every pane mirrors the same logical range over the same bars, so a bar
+   * index lands on the same x in all of them.
+   */
+  const verticalLineX = (chart: IChartApi, container: HTMLDivElement, timeMs: number): number | null => {
+    const index = barIndexAtTime(bars, timeMs);
+    if (index === null) {
+      return null;
+    }
+    const x = chart.timeScale().logicalToCoordinate(index as Logical);
+    if (x === null || x < 0 || x > plotWidth(chart, container)) {
+      return null;
+    }
+    return x;
+  };
+
+  /**
+   * lightweight-charts has no vertical line primitive, so these are DOM strips
+   * over the plot area, redrawn with the session shading on every pan and zoom.
+   */
+  const renderVerticalLines = (chart: IChartApi, container: HTMLDivElement): void => {
+    const strips: string[] = [];
+    for (const line of lines) {
+      if (line.kind !== "vertical") {
+        continue;
+      }
+      const x = verticalLineX(chart, container, line.timeMs);
+      if (x !== null) {
+        strips.push(`<div class="chart-vline" style="left:${x.toFixed(1)}px;background:${line.color}"></div>`);
+      }
+    }
+
+    let overlay = container.querySelector(".chart-line-overlay") as HTMLDivElement | null;
+    if (strips.length === 0) {
+      overlay?.remove();
+      return;
+    }
+
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.className = "chart-line-overlay";
+      container.appendChild(overlay);
+    }
+
+    // Stay off the price axis and, on the bottom pane, the time axis.
+    overlay.style.width = `${plotWidth(chart, container)}px`;
+    overlay.style.bottom = `${chart.timeScale().height()}px`;
+    overlay.innerHTML = strips.join("");
+  };
+
+  const syncHorizontalLines = (): void => {
+    if (!priceSeries) {
+      return;
+    }
+
+    for (const handle of horizontalLineHandles) {
+      priceSeries.removePriceLine(handle);
+    }
+    horizontalLineHandles = [];
+
+    for (const line of lines) {
+      if (line.kind !== "horizontal") {
+        continue;
+      }
+      horizontalLineHandles.push(
+        priceSeries.createPriceLine({
+          price: line.price,
+          color: line.color,
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
+          axisLabelVisible: true,
+          title: "",
+        }),
+      );
+    }
+  };
+
+  const setLines = (next: ChartLine[]): void => {
+    lines = next;
+    syncHorizontalLines();
+    scheduleOverlays();
+  };
+
+  const endLinePlacement = (): void => {
+    placingKind = null;
+    stackContainer.classList.remove("placing-line");
+    if (priceChart && crosshairModeBeforePlacing !== null) {
+      priceChart.applyOptions({ crosshair: { mode: crosshairModeBeforePlacing } });
+    }
+    crosshairModeBeforePlacing = null;
+  };
+
+  const beginLinePlacement = (kind: ChartLineKind): void => {
+    if (placingKind === null && priceChart) {
+      // The default magnet crosshair snaps to the close, which would make a
+      // horizontal line land somewhere other than where the crosshair showed.
+      crosshairModeBeforePlacing = priceChart.options().crosshair.mode;
+      priceChart.applyOptions({ crosshair: { mode: CrosshairMode.Normal } });
+    }
+    placingKind = kind;
+    stackContainer.classList.add("placing-line");
+  };
+
+  const handlePlacementClick = (chart: IChartApi, param: MouseEventParams): void => {
+    if (!placingKind || !param.point || bars.length === 0) {
+      return;
+    }
+
+    let anchor: ChartLineAnchor;
+    if (placingKind === "horizontal") {
+      // Price levels only mean something on the price pane.
+      if (chart !== priceChart || !priceSeries) {
+        return;
+      }
+      const price = priceSeries.coordinateToPrice(param.point.y);
+      if (price === null || !Number.isFinite(price)) {
+        return;
+      }
+      anchor = { kind: "horizontal", price };
+    } else {
+      const logical = param.logical ?? chart.timeScale().coordinateToLogical(param.point.x);
+      if (logical === null) {
+        return;
+      }
+      anchor = { kind: "vertical", timeMs: bars[clamp(0, bars.length - 1, Math.round(logical))].t };
+    }
+
+    endLinePlacement();
+    deps.onLinePlaced?.(anchor);
+  };
+
+  const lineAt = (clientX: number, clientY: number): string | null => {
+    const hits: Array<{ id: string; distance: number }> = [];
+
+    for (const { chart, container } of allPanes()) {
+      const rect = container.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+      if (x < 0 || y < 0 || x > rect.width || y > rect.height - chart.timeScale().height()) {
+        continue;
+      }
+
+      for (const line of lines) {
+        if (line.kind === "vertical") {
+          const lineX = verticalLineX(chart, container, line.timeMs);
+          if (lineX !== null) {
+            hits.push({ id: line.id, distance: Math.abs(lineX - x) });
+          }
+        } else if (chart === priceChart && priceSeries) {
+          // Includes the price axis, where the line's own label sits.
+          const lineY = priceSeries.priceToCoordinate(line.price);
+          if (lineY !== null) {
+            hits.push({ id: line.id, distance: Math.abs(lineY - y) });
+          }
+        }
+      }
+    }
+
+    const nearest = hits
+      .filter((hit) => hit.distance <= LINE_HIT_TOLERANCE_PX)
+      .sort((a, b) => a.distance - b.distance)[0];
+    return nearest?.id ?? null;
   };
 
   const timeAxisOptions = (visible: boolean) => ({
@@ -570,7 +806,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     onVisibleRangeChange(viewKey, range);
     syncMultiDayView(range);
     maybeRequestOlderData(range);
-    scheduleShading();
+    scheduleOverlays();
   };
 
   const basePaneOptions = (faintGrid: boolean) => ({
@@ -592,6 +828,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   /** Wires a chart into the shared crosshair and range-sync subscriptions. */
   const connectChart = (chart: IChartApi): void => {
     chart.subscribeCrosshairMove(renderLegendForCrosshair);
+    chart.subscribeClick((param) => handlePlacementClick(chart, param));
     chart.timeScale().subscribeVisibleLogicalRangeChange(() => mirrorRange(chart));
   };
 
@@ -748,7 +985,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       for (const pane of studyPanes) {
         pane.chart.resize(pane.container.clientWidth, pane.container.clientHeight);
       }
-      scheduleShading();
+      scheduleOverlays();
     });
 
     resizeObserver.observe(stackContainer);
@@ -772,6 +1009,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       priceChart.removeSeries(priceSeries);
       // Any reference line died with the series it was drawn on.
       previousCloseLine = null;
+      horizontalLineHandles = [];
     }
 
     chartType = nextChartType;
@@ -1050,6 +1288,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     applyStudyData();
 
     syncPreviousCloseLine();
+    syncHorizontalLines();
     renderAllLegends(bars.length - 1);
   };
 
@@ -1156,6 +1395,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     bars = request.bars;
     viewKey = request.viewKey;
     previousClose = request.previousClose;
+    lines = request.lines;
     defaultVisibleRange = request.defaultVisibleRange;
     studyKeys = request.studyKeys;
     syncPriceSeries(request.chartType);
@@ -1190,7 +1430,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     // without moving the logical range, so the subscription won't fire.
     syncMultiDayView(priceChart!.timeScale().getVisibleLogicalRange());
 
-    scheduleShading();
+    scheduleOverlays();
   };
 
   /** Folds the newest indicator values into the study series. */
@@ -1283,7 +1523,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     }
 
     renderAllLegends(bars.length - 1);
-    scheduleShading();
+    scheduleOverlays();
   };
 
   const getVisibleLogicalRange = (): VisibleRange | null => {
@@ -1292,9 +1532,9 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   };
 
   const dispose = (): void => {
-    if (shadingFrame !== null) {
-      window.cancelAnimationFrame(shadingFrame);
-      shadingFrame = null;
+    if (overlayFrame !== null) {
+      window.cancelAnimationFrame(overlayFrame);
+      overlayFrame = null;
     }
 
     resizeObserver?.disconnect();
@@ -1312,6 +1552,10 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
 
     clearSessionShading(priceContainer);
     clearSessionShading(volumeContainer);
+    for (const container of [priceContainer, volumeContainer]) {
+      container.querySelector(".chart-line-overlay")?.remove();
+    }
+    endLinePlacement();
 
     legendEl?.remove();
     legendEl = null;
@@ -1330,6 +1574,8 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     newestSeriesTime = null;
     previousClose = null;
     previousCloseLine = null;
+    horizontalLineHandles = [];
+    lines = [];
     defaultVisibleRange = null;
     multiDayView = false;
   };
@@ -1337,8 +1583,19 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   /** Back to the view this range opens on, with both scales auto again. */
   const resetView = (): void => {
     restoreView("default");
-    scheduleShading();
+    scheduleOverlays();
   };
 
-  return { render, applyLiveBars, resetView, getVisibleLogicalRange, applyPaneLayout, dispose };
+  return {
+    render,
+    applyLiveBars,
+    resetView,
+    getVisibleLogicalRange,
+    applyPaneLayout,
+    setLines,
+    beginLinePlacement,
+    cancelLinePlacement: endLinePlacement,
+    lineAt,
+    dispose,
+  };
 }

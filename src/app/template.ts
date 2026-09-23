@@ -32,14 +32,25 @@ export const APP_TEMPLATE = `
         <div class="interval-group hidden" id="interval-group"></div>
         <div class="ma-group" id="ma-group"></div>
         <div class="chart-type-switch" id="type-group" role="group" aria-label="Chart type"></div>
-        <div class="study-picker" id="study-picker">
-          <button type="button" class="pill study-toggle" id="study-toggle" aria-haspopup="dialog" aria-expanded="false">Studies</button>
-          <div class="study-menu hidden" id="study-menu" role="dialog" aria-label="Chart studies">
-            <div class="study-menu-header">
-              <input id="study-filter" type="text" class="study-filter" placeholder="Filter studies" aria-label="Filter studies" autocomplete="off" spellcheck="false" />
-              <button type="button" class="study-clear" data-study-clear>Clear</button>
+        <div class="chart-tools">
+          <div class="line-picker" id="line-picker">
+            <button type="button" class="pill line-toggle" id="line-toggle" aria-haspopup="menu" aria-expanded="false">Lines</button>
+            <div class="line-dropdown hidden" id="line-dropdown" role="menu" aria-label="Chart lines">
+              <button type="button" class="line-option" role="menuitem" data-line-kind="horizontal"><span class="line-glyph horizontal" aria-hidden="true"></span>Horizontal line</button>
+              <button type="button" class="line-option" role="menuitem" data-line-kind="vertical"><span class="line-glyph vertical" aria-hidden="true"></span>Vertical line</button>
+              <div class="line-divider" role="separator"></div>
+              <button type="button" class="line-option danger" role="menuitem" data-line-clear-all>Clear all lines</button>
             </div>
-            <div class="study-list" id="study-list" role="group"></div>
+          </div>
+          <div class="study-picker" id="study-picker">
+            <button type="button" class="pill study-toggle" id="study-toggle" aria-haspopup="dialog" aria-expanded="false">Studies</button>
+            <div class="study-menu hidden" id="study-menu" role="dialog" aria-label="Chart studies">
+              <div class="study-menu-header">
+                <input id="study-filter" type="text" class="study-filter" placeholder="Filter studies" aria-label="Filter studies" autocomplete="off" spellcheck="false" />
+                <button type="button" class="study-clear" data-study-clear>Clear</button>
+              </div>
+              <div class="study-list" id="study-list" role="group"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -60,6 +71,11 @@ export const APP_TEMPLATE = `
         <div class="news-grid" id="news-grid"></div>
       </section>
     </section>
+  </div>
+  <div class="line-context-menu hidden" id="line-context-menu" role="menu" aria-label="Line options">
+    <div class="line-swatches" id="line-swatches" role="group" aria-label="Line colour"></div>
+    <div class="line-divider" role="separator"></div>
+    <button type="button" class="line-option danger" role="menuitem" data-line-remove>Clear line</button>
   </div>
   <div class="prefs-overlay hidden" id="prefs-overlay">
     <form class="prefs-panel" id="prefs-form" role="dialog" aria-modal="true" aria-labelledby="prefs-title">

@@ -7,6 +7,7 @@ import {
   fmtPct,
   formatAxisTime,
   isRateLimitError,
+  normalizeChartLinesByTicker,
   normalizeMovingAveragePeriods,
   normalizeStoredRatio,
   normalizeTicker,
@@ -143,5 +144,30 @@ describe("formatAxisTime", () => {
 
   it("never shows a clock time on the day timespan", () => {
     expect(formatAxisTime(intradayTime, TickMarkType.Time, "day", true)).toBe("Aug 28");
+  });
+});
+
+describe("normalizeChartLinesByTicker", () => {
+  it("keeps well-formed lines of both kinds", () => {
+    const lines = {
+      AAPL: [
+        { id: "a", kind: "horizontal", price: 187.5, color: "#f59e0b" },
+        { id: "b", kind: "vertical", timeMs: 1_700_000_000_000, color: "#60A5FA" },
+      ],
+    };
+    expect(normalizeChartLinesByTicker(lines)).toEqual(lines);
+  });
+
+  it("drops malformed lines and symbols left empty", () => {
+    expect(normalizeChartLinesByTicker({
+      AAPL: [
+        { id: "a", kind: "horizontal", price: "x", color: "#f59e0b" },
+        { id: "b", kind: "vertical", timeMs: 1, color: "red;background:url(x)" },
+        { kind: "horizontal", price: 1, color: "#f59e0b" },
+        { id: "c", kind: "diagonal", price: 1, color: "#f59e0b" },
+      ],
+      MSFT: "nope",
+    })).toEqual({});
+    expect(normalizeChartLinesByTicker(null)).toEqual({});
   });
 });

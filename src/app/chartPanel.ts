@@ -5,15 +5,21 @@ import { clearSessionShading, renderSessionShading } from "./market";
 import { getStoredVisibleRange, onVisibleRangeChange } from "./prefs";
 import { currentAggregationPreset, currentChartResetKey, currentChartViewKey, state } from "./store";
 import { getNyParts } from "./utils";
-import type { AggregateBar } from "./types";
+import type { AggregateBar, ChartLine, ChartLineAnchor, ChartLineKind } from "./types";
 
 let controller: ChartController | null = null;
 
 export type ChartPanelOptions = {
   onNeedOlderData?: () => void;
+  onLinePlaced?: (anchor: ChartLineAnchor) => void;
+  /** Fired whenever the chart is handed a (possibly different) set of lines. */
+  onLinesShown?: (lines: ChartLine[]) => void;
 };
 
+let onLinesShown: ((lines: ChartLine[]) => void) | undefined;
+
 export function initChartPanel(options: ChartPanelOptions = {}): void {
+  onLinesShown = options.onLinesShown;
   controller = createChartController({
     stackContainer: els.chartStackEl,
     lowerPanesContainer: els.lowerPanesEl,
@@ -39,6 +45,7 @@ export function initChartPanel(options: ChartPanelOptions = {}): void {
       onVisibleRangeChange(viewKey, range);
     },
     onNeedOlderData: options.onNeedOlderData,
+    onLinePlaced: options.onLinePlaced,
   });
 }
 
@@ -102,7 +109,22 @@ function defaultViewForOneDay(): VisibleRange | null {
   return { from, to: bars.length + 2.5 };
 }
 
+/**
+ * The symbol the bars on screen belong to. Right after a watchlist click that
+ * is still the previous one, and its lines must stay with its bars.
+ */
+export function chartedTicker(): string {
+  const viewKey = state.loadedViewKey || currentChartViewKey();
+  return viewKey.slice(0, viewKey.lastIndexOf(":"));
+}
+
+export function chartLinesFor(ticker: string): ChartLine[] {
+  return state.prefs.chartLinesByTicker?.[ticker] ?? [];
+}
+
 export function renderCharts(prependedBars?: number): void {
+  const lines = chartLinesFor(chartedTicker());
+  onLinesShown?.(lines);
   controller?.render({
     bars: state.latestBars,
     chartType: state.selectedChartType,
@@ -111,6 +133,7 @@ export function renderCharts(prependedBars?: number): void {
     movingAveragePeriods: state.selectedMovingAveragePeriods,
     studyKeys: state.selectedStudyKeys,
     previousClose: previousCloseForChart(),
+    lines,
     defaultVisibleRange: defaultViewForOneDay(),
     prependedBars,
     // Keyed to the bars in hand, not to the selection: a redraw that lands
@@ -133,6 +156,25 @@ export function pushLiveBars(bars: AggregateBar[]): void {
 /** Re-applies the chart stack's row sizes, e.g. after a splitter drag. */
 export function applyChartPaneLayout(): void {
   controller?.applyPaneLayout();
+}
+
+/** Redraws the drawn lines without touching the rest of the chart. */
+export function syncChartLines(): void {
+  const lines = chartLinesFor(chartedTicker());
+  onLinesShown?.(lines);
+  controller?.setLines(lines);
+}
+
+export function beginLinePlacement(kind: ChartLineKind): void {
+  controller?.beginLinePlacement(kind);
+}
+
+export function cancelLinePlacement(): void {
+  controller?.cancelLinePlacement();
+}
+
+export function chartLineAt(clientX: number, clientY: number): string | null {
+  return controller?.lineAt(clientX, clientY) ?? null;
 }
 
 export function getVisibleLogicalRange(): VisibleRange | null {

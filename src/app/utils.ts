@@ -1,5 +1,5 @@
 import { TickMarkType, type Time } from "lightweight-charts";
-import type { AggregateBar, RangePreset } from "./types";
+import type { AggregateBar, ChartLine, RangePreset } from "./types";
 
 export function parseRetryAfterSeconds(error: unknown): number | null {
   const text = String(error);
@@ -130,6 +130,54 @@ export function normalizeVisibleRangesByViewKey(input: unknown): Record<string, 
     .filter((entry): entry is readonly [string, { from: number; to: number }] => Boolean(entry));
 
   return Object.fromEntries(normalizedEntries);
+}
+
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+function normalizeChartLine(value: unknown): ChartLine | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const id = typeof candidate.id === "string" ? candidate.id : "";
+  const color = typeof candidate.color === "string" ? candidate.color : "";
+  // The colour is written straight into a style attribute, so only plain hex
+  // survives a round trip through the prefs file.
+  if (!id || !HEX_COLOR.test(color)) {
+    return null;
+  }
+
+  if (candidate.kind === "horizontal") {
+    const price = Number(candidate.price);
+    return Number.isFinite(price) ? { id, color, kind: "horizontal", price } : null;
+  }
+
+  if (candidate.kind === "vertical") {
+    const timeMs = Number(candidate.timeMs);
+    return Number.isFinite(timeMs) ? { id, color, kind: "vertical", timeMs } : null;
+  }
+
+  return null;
+}
+
+/** Drops malformed lines, and symbols left with none. */
+export function normalizeChartLinesByTicker(input: unknown): Record<string, ChartLine[]> {
+  if (!input || typeof input !== "object") {
+    return {};
+  }
+
+  const result: Record<string, ChartLine[]> = {};
+  for (const [ticker, value] of Object.entries(input as Record<string, unknown>)) {
+    const lines = Array.isArray(value)
+      ? value.map(normalizeChartLine).filter((line): line is ChartLine => line !== null)
+      : [];
+    if (lines.length > 0) {
+      result[ticker] = lines;
+    }
+  }
+
+  return result;
 }
 
 export function fmtNumber(value: number): string {

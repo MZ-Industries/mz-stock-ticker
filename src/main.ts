@@ -1,5 +1,6 @@
 import { loadOlderBars } from "./app/actions";
 import { initChartPanel } from "./app/chartPanel";
+import { addChartLine, initChartLines, syncLineToolbar } from "./app/chartLines";
 import { initElements } from "./app/elements";
 import {
   bootstrapApp,
@@ -17,7 +18,10 @@ initChartPanel({
   onNeedOlderData: () => {
     void loadOlderBars();
   },
+  onLinePlaced: addChartLine,
+  onLinesShown: syncLineToolbar,
 });
+initChartLines();
 
 registerWatchlistEventHandlers();
 registerGlobalEventHandlers();

@@ -8,6 +8,10 @@ export type AppElements = {
   intervalGroupEl: HTMLDivElement;
   typeGroupEl: HTMLDivElement;
   maGroupEl: HTMLDivElement;
+  lineToggleEl: HTMLButtonElement;
+  lineDropdownEl: HTMLDivElement;
+  lineContextMenuEl: HTMLDivElement;
+  lineSwatchesEl: HTMLDivElement;
   studyToggleEl: HTMLButtonElement;
   studyMenuEl: HTMLDivElement;
   studyFilterEl: HTMLInputElement;
@@ -68,6 +72,10 @@ export function initElements(root: ParentNode = document): AppElements {
     intervalGroupEl: root.querySelector("#interval-group") as HTMLDivElement,
     typeGroupEl: root.querySelector("#type-group") as HTMLDivElement,
     maGroupEl: root.querySelector("#ma-group") as HTMLDivElement,
+    lineToggleEl: root.querySelector("#line-toggle") as HTMLButtonElement,
+    lineDropdownEl: root.querySelector("#line-dropdown") as HTMLDivElement,
+    lineContextMenuEl: root.querySelector("#line-context-menu") as HTMLDivElement,
+    lineSwatchesEl: root.querySelector("#line-swatches") as HTMLDivElement,
     studyToggleEl: root.querySelector("#study-toggle") as HTMLButtonElement,
     studyMenuEl: root.querySelector("#study-menu") as HTMLDivElement,
     studyFilterEl: root.querySelector("#study-filter") as HTMLInputElement,

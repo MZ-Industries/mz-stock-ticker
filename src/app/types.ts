@@ -103,6 +103,15 @@ export type AppSettings = {
   debugLogging: boolean;
 };
 
+/** Where a user-drawn line sits: a price level, or the bar a moment falls in. */
+export type ChartLineAnchor =
+  | { kind: "horizontal"; price: number }
+  | { kind: "vertical"; timeMs: number };
+
+export type ChartLineKind = ChartLineAnchor["kind"];
+
+export type ChartLine = ChartLineAnchor & { id: string; color: string };
+
 export type AppPrefs = {
   ticker: string;
   rangeLabel: string;
@@ -116,6 +125,8 @@ export type AppPrefs = {
   /** Whether the app checks GitHub for updates on its own. */
   autoUpdateCheck?: boolean;
   visibleRangesByViewKey?: Record<string, { from: number; to: number }>;
+  /** Lines the user has drawn, per symbol. */
+  chartLinesByTicker?: Record<string, ChartLine[]>;
   sidebarWidth: number;
   pricePaneHeight: number;
   chartAreaHeight: number;

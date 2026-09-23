@@ -601,6 +601,177 @@ p {
   color: #042124;
 }
 
+/* Lines and Studies sit together at the end of the controls row. */
+.chart-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Lines dropdown and the right-click menu on a drawn line. */
+.line-picker {
+  position: relative;
+}
+
+.line-toggle::after {
+  content: "";
+  display: inline-block;
+  margin-left: 7px;
+  border: 4px solid transparent;
+  border-top-color: currentColor;
+  transform: translateY(2px);
+}
+
+.line-toggle.placing::after {
+  display: none;
+}
+
+.line-dropdown,
+.line-context-menu {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid #223247;
+  border-radius: 12px;
+  background: rgba(8, 13, 24, 0.97);
+  box-shadow: 0 18px 40px rgba(2, 6, 16, 0.6);
+  backdrop-filter: blur(10px);
+}
+
+.line-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: 200px;
+}
+
+.line-context-menu {
+  position: fixed;
+  z-index: 60;
+  width: 184px;
+}
+
+.line-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.line-option:hover:not(:disabled) {
+  background: rgba(45, 212, 191, 0.1);
+}
+
+.line-option.danger:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+}
+
+.line-option:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: default;
+}
+
+.line-glyph {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.line-glyph::before {
+  content: "";
+  position: absolute;
+  background: var(--accent);
+  border-radius: 1px;
+}
+
+.line-glyph.horizontal::before {
+  left: 0;
+  right: 0;
+  top: 6px;
+  height: 2px;
+}
+
+.line-glyph.vertical::before {
+  top: 0;
+  bottom: 0;
+  left: 6px;
+  width: 2px;
+}
+
+.line-divider {
+  height: 1px;
+  margin: 5px 2px;
+  background: var(--border);
+}
+
+.line-swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding: 6px 8px 4px;
+}
+
+.line-swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 2px rgba(8, 13, 24, 0.97);
+  cursor: pointer;
+}
+
+.line-swatch:hover,
+.line-swatch.selected {
+  border-color: var(--swatch);
+}
+
+.line-swatch.selected {
+  box-shadow: inset 0 0 0 3px rgba(8, 13, 24, 0.97);
+}
+
+.chart-line-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.chart-vline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+}
+
+/* lightweight-charts sets inline cursors on its canvases. */
+.chart-stack.placing-line .price-chart,
+.chart-stack.placing-line .price-chart *,
+.chart-stack.placing-line .lower-panes,
+.chart-stack.placing-line .lower-panes * {
+  cursor: crosshair !important;
+}
+
+.chart-stack.line-hover .price-chart *,
+.chart-stack.line-hover .lower-panes * {
+  cursor: context-menu !important;
+}
+
 /* Studies dropdown. */
 .study-picker {
   position: relative;

@@ -12,6 +12,7 @@ import {
 import { currentChartViewKey, persistPrefs, state } from "./store";
 import { normalizeStudyKeys } from "./studies";
 import {
+  normalizeChartLinesByTicker,
   normalizeMovingAveragePeriods,
   normalizeVisibleRangesByViewKey,
   normalizeWatchlistSymbols,
@@ -63,6 +64,8 @@ export async function initPrefs(): Promise<void> {
     prefs.candleIntervalKey && CANDLE_INTERVAL_OPTIONS.some((item) => item.key === prefs.candleIntervalKey)
       ? prefs.candleIntervalKey
       : "5m";
+
+  prefs.chartLinesByTicker = normalizeChartLinesByTicker(prefs.chartLinesByTicker);
 
   hydrateVisibleRangeState();
   persistPrefs();
