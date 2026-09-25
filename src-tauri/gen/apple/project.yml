@@ -69,6 +69,14 @@ targets:
         LIBRARY_SEARCH_PATHS[arch=arm64]: $(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)
         ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: true
         EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
+        # Placeholders that `tauri ios build` overwrites for CI signing. Its
+        # project editor replaces existing keys correctly but writes new ones
+        # outside buildSettings, where Xcode ignores them.
+        CODE_SIGN_IDENTITY[sdk=iphoneos*]: iPhone Developer
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM[sdk=iphoneos*]: ZK25D4KTDC
+        PROVISIONING_PROFILE_SPECIFIER: ""
+        PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]: ""
       groups: [app]
     dependencies:
       - framework: libapp.a
