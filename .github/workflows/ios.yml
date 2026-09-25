@@ -71,6 +71,22 @@ jobs:
           mv "$profile" "$dir/$uuid.mobileprovision"
           echo "Installed profile $uuid"
 
+      # tauri ios build rewrites the signing keys in project.pbxproj, but its
+      # export options are built from the values it read *before* rewriting,
+      # so the export would ask for automatic signing (which needs an Apple
+      # account). Switch the committed placeholders to manual signing here so
+      # both steps agree. Local builds keep automatic signing.
+      - name: Switch the Xcode project to manual signing
+        run: |
+          set -euo pipefail
+          pbx=src-tauri/gen/apple/mz-stock-ticker.xcodeproj/project.pbxproj
+          sed -i '' \
+            -e 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/' \
+            -e 's/"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]" = "iPhone Developer";/"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Distribution";/' \
+            "$pbx"
+          test "$(grep -c 'CODE_SIGN_STYLE = Manual;' "$pbx")" -eq 2
+          test "$(grep -c '"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]" = "Apple Distribution";' "$pbx")" -eq 2
+
       # Tauri reads IOS_CERTIFICATE / IOS_CERTIFICATE_PASSWORD /
       # IOS_MOBILE_PROVISION and signs manually with them. The run number
       # becomes the build number (CFBundleVersion 0.6.0.<n>), which
