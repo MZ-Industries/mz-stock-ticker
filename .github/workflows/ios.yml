@@ -55,6 +55,22 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # Tauri installs IOS_MOBILE_PROVISION into ~/Library/MobileDevice, but
+      # Xcode 16+ only looks in UserData, so put a copy there too, named by
+      # its UUID (which is what Tauri writes into the project).
+      - name: Install provisioning profile for Xcode 16+
+        env:
+          IOS_MOBILE_PROVISION: ${{ secrets.IOS_MOBILE_PROVISION }}
+        run: |
+          set -euo pipefail
+          dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+          mkdir -p "$dir"
+          profile="$RUNNER_TEMP/profile.mobileprovision"
+          printf '%s' "$IOS_MOBILE_PROVISION" | base64 --decode > "$profile"
+          uuid=$(security cms -D -i "$profile" | plutil -extract UUID raw -)
+          mv "$profile" "$dir/$uuid.mobileprovision"
+          echo "Installed profile $uuid"
+
       # Tauri reads IOS_CERTIFICATE / IOS_CERTIFICATE_PASSWORD /
       # IOS_MOBILE_PROVISION and signs manually with them. The run number
       # becomes the build number (CFBundleVersion 0.6.0.<n>), which
