@@ -86,6 +86,22 @@ jobs:
           --export-method app-store-connect
           --build-number ${{ github.run_number }}
 
+      - name: Signing diagnostics
+        if: failure()
+        run: |
+          echo "::group::Provisioning profiles"
+          ls -la "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" "$HOME/Library/MobileDevice/Provisioning Profiles" || true
+          echo "::endgroup::"
+          echo "::group::Keychains and codesigning identities"
+          security list-keychains -d user
+          security find-identity -v -p codesigning
+          echo "::endgroup::"
+          echo "::group::Signing settings Tauri wrote"
+          git diff -- src-tauri/gen/apple || true
+          grep -nE "CODE_SIGN|PROVISIONING|DEVELOPMENT_TEAM" src-tauri/gen/apple/mz-stock-ticker.xcodeproj/project.pbxproj || true
+          cat src-tauri/gen/apple/ExportOptions.plist || true
+          echo "::endgroup::"
+
       - name: Upload to App Store Connect
         env:
           APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
