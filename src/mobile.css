@@ -12,6 +12,11 @@ html.is-mobile #app {
   height: 100dvh;
 }
 
+/* No double-tap-to-zoom on the page; the charts keep their own gestures. */
+html.is-mobile {
+  touch-action: manipulation;
+}
+
 html.is-mobile #app {
   padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
   -webkit-tap-highlight-color: transparent;

@@ -23,4 +23,26 @@ export async function initPlatform(): Promise<void> {
     root.dataset.platform = platform;
   }
   root.classList.toggle("is-mobile", IS_MOBILE);
+
+  if (IS_MOBILE) {
+    lockPageZoom();
+  }
+}
+
+/**
+ * A pinch that misses the chart would otherwise zoom the whole app, which
+ * there is no easy way back from. The charts handle their own pinch-to-zoom.
+ */
+function lockPageZoom(): void {
+  const viewport = document.querySelector('meta[name="viewport"]');
+  viewport?.setAttribute(
+    "content",
+    "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover",
+  );
+
+  // WebKit's own pinch events; cancelling them stops a zoom the viewport
+  // limits alone can let through.
+  for (const type of ["gesturestart", "gesturechange"]) {
+    document.addEventListener(type, (event) => event.preventDefault(), { passive: false });
+  }
 }
