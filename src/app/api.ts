@@ -58,6 +58,10 @@ export function stopLiveStream(): Promise<void> {
   return invoke("stop_live_stream");
 }
 
+export function appPlatform(): Promise<string> {
+  return invoke("app_platform");
+}
+
 export function listenLiveBars(handler: (event: LiveBarsEvent) => void): Promise<UnlistenFn> {
   return listen<LiveBarsEvent>("live-bars", (event) => handler(event.payload));
 }

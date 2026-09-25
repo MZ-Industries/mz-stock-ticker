@@ -26,6 +26,8 @@ import {
 import { els } from "./elements";
 import { applyStoredPaneSizes, reorderWatchlistSymbols, setupSplitters } from "./layout";
 import { isCandleIntervalRelevant } from "./market";
+import { initMobileShell, showMobileTab } from "./mobile";
+import { IS_MOBILE } from "./platform";
 import { initPreferences, isPreferencesOpen } from "./preferences";
 import { ensureSelectedTicker, flushVisibleRange, initPrefs, persistWatchlistSymbols } from "./prefs";
 import { startRefreshProgressLoop, stopRefreshProgressLoop } from "./progress";
@@ -95,19 +97,46 @@ function selectTickerViaKeyboard(ticker: string): void {
   }, 350);
 }
 
+/**
+ * iOS suspends the app in the background, and the live poll with it, and
+ * rarely fires `beforeunload`. Stop streaming on the way out and catch up in
+ * full on the way back.
+ */
+function handleMobileVisibilityChange(): void {
+  if (document.hidden) {
+    flushVisibleRange(getVisibleLogicalRange());
+    clearAdaptiveBarsRefresh();
+    void api.stopLiveStream();
+    return;
+  }
+
+  // Restarts the stream and the adaptive refresh too.
+  void refreshAll();
+}
+
 export function registerGlobalEventHandlers(): void {
   document.addEventListener("visibilitychange", () => {
+    if (IS_MOBILE) {
+      handleMobileVisibilityChange();
+      return;
+    }
     scheduleAdaptiveBarsRefresh();
     if (!document.hidden && !isApiCooldownActive()) {
       void loadWatchlist();
     }
   });
 
-  window.addEventListener("focus", () => {
-    if (!isApiCooldownActive()) {
-      void loadWatchlist();
-    }
-  });
+  if (IS_MOBILE) {
+    window.addEventListener("pagehide", () => {
+      flushVisibleRange(getVisibleLogicalRange());
+    });
+  } else {
+    window.addEventListener("focus", () => {
+      if (!isApiCooldownActive()) {
+        void loadWatchlist();
+      }
+    });
+  }
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
@@ -355,6 +384,9 @@ export function registerWatchlistEventHandlers(): void {
 
 export async function bootstrapApp(): Promise<void> {
   startRefreshProgressLoop();
+  if (IS_MOBILE) {
+    initMobileShell();
+  }
   await loadProviderStatus();
   await initPrefs();
   ensureSelectedTicker();
@@ -377,7 +409,12 @@ export async function bootstrapApp(): Promise<void> {
       persistWatchlistSymbols();
       return true;
     },
-    onSelectTicker: selectTickerAndRefresh,
+    onSelectTicker: IS_MOBILE
+      ? (ticker) => {
+        showMobileTab("chart");
+        return selectTickerAndRefresh(ticker);
+      }
+      : selectTickerAndRefresh,
     onRenderRows: renderWatchlistRows,
     onBadgeClick: () => {
       cycleWatchlistBadgeMode();
@@ -387,6 +424,7 @@ export async function bootstrapApp(): Promise<void> {
     setSuppressWatchlistClick: (value) => {
       state.suppressWatchlistClick = value;
     },
+    holdToDragMs: IS_MOBILE ? 400 : undefined,
   });
 
   await attachLiveBarsListener();
@@ -412,7 +450,10 @@ export async function bootstrapApp(): Promise<void> {
 
   scheduleAdaptiveBarsRefresh();
   initPreferences();
-  initUpdater();
+  // Mobile updates come through the App Store / TestFlight.
+  if (!IS_MOBILE) {
+    initUpdater();
+  }
 }
 
 export function registerBeforeUnloadHandler(): void {

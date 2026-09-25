@@ -14,6 +14,10 @@ mod commands;
 use commands::*;
 mod market;
 use market::*;
+#[cfg(desktop)]
+mod menu;
+#[cfg(mobile)]
+#[path = "menu_mobile.rs"]
 mod menu;
 mod settings;
 
@@ -293,19 +297,26 @@ fn snapshot_cache() -> &'static SnapshotCache {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(StreamState::default())
-        .menu(menu::build)
-        .on_menu_event(menu::handle_event)
         .setup(|app| {
             settings::load(app.handle());
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_store::Builder::default().build());
+
+    // The native menu, window geometry and self-updating only exist on
+    // desktop; the app stores deliver updates on mobile.
+    #[cfg(desktop)]
+    let builder = builder
+        .menu(menu::build)
+        .on_menu_event(menu::handle_event)
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_process::init());
+
+    builder
         .invoke_handler(tauri::generate_handler![
             get_provider_status,
             fetch_aggregates,
@@ -314,6 +325,7 @@ pub fn run() {
             fetch_news,
             fetch_symbol_detail,
             search_symbols,
+            app_platform,
             start_live_stream,
             stop_live_stream,
             menu::set_auto_update_check,

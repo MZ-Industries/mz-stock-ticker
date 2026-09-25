@@ -173,8 +173,8 @@ export function cancelLinePlacement(): void {
   controller?.cancelLinePlacement();
 }
 
-export function chartLineAt(clientX: number, clientY: number): string | null {
-  return controller?.lineAt(clientX, clientY) ?? null;
+export function chartLineAt(clientX: number, clientY: number, tolerancePx?: number): string | null {
+  return controller?.lineAt(clientX, clientY, tolerancePx) ?? null;
 }
 
 export function getVisibleLogicalRange(): VisibleRange | null {

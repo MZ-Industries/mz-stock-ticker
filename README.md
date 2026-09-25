@@ -138,6 +138,23 @@ npm run build                         # typecheck + bundle
 cd src-tauri && cargo test            # backend tests
 ```
 
+#### iOS
+
+The same codebase builds for iPhone and iPad. It needs Xcode, a rustup-managed
+Rust toolchain (Homebrew's `rust` cannot add iOS targets), and xcodegen:
+
+```bash
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+brew install xcodegen
+npm run tauri ios dev                 # simulator; add --open to run on a device from Xcode
+```
+
+The Xcode project lives in `src-tauri/gen/apple`. Desktop-only pieces (menu,
+updater, window state) are compiled out with `#[cfg(desktop)]`; the frontend
+asks the backend for its platform at startup (`src/app/platform.ts`) and only
+then switches to the touch layout in `src/mobile.css`, whose rules are all
+scoped under `html.is-mobile`.
+
 <details>
 <summary><strong>Architecture notes</strong></summary>
 
@@ -162,7 +179,9 @@ the view stays put.
 Releases are automated with [release-please](https://github.com/googleapis/release-please):
 conventional commits on `main` maintain a version-bump PR; merging it runs the
 test suite, builds all four platform bundles, and publishes the GitHub release
-only if everything passes.
+only if everything passes. After publishing, `.github/workflows/ios.yml` builds
+the iOS app and uploads it to TestFlight (enabled by the `IOS_TESTFLIGHT` repo
+variable).
 
 ## Data notes
 

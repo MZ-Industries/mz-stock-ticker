@@ -1,0 +1,89 @@
+name: iOS (TestFlight)
+
+# Builds the iOS app and uploads it to App Store Connect, where it appears in
+# TestFlight. Runs on its own from the Actions tab, or from release.yml once a
+# desktop release has been published, so a failure here never holds up the
+# desktop builds or the auto-updater. Re-run it on its own if it fails.
+#
+# Needs these repo secrets:
+#   IOS_CERTIFICATE           base64 of the "Apple Distribution" .p12
+#   IOS_CERTIFICATE_PASSWORD  password for that .p12
+#   IOS_MOBILE_PROVISION      base64 of the App Store provisioning profile
+#   APPSTORE_API_KEY_ID       App Store Connect API key id
+#   APPSTORE_API_ISSUER_ID    App Store Connect API issuer id
+#   APPSTORE_API_PRIVATE_KEY  contents of the API key's AuthKey_<id>.p8
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref (tag, branch or SHA) to build
+        required: false
+        default: main
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref (tag, branch or SHA) to build
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  testflight:
+    name: Build + upload to TestFlight
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Tauri reads IOS_CERTIFICATE / IOS_CERTIFICATE_PASSWORD /
+      # IOS_MOBILE_PROVISION and signs manually with them. The run number
+      # becomes the build number (CFBundleVersion 0.6.0.<n>), which
+      # App Store Connect requires to be unique for each upload.
+      - name: Build IPA
+        env:
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.IOS_MOBILE_PROVISION }}
+        run: >
+          npm run tauri ios build --
+          --ci
+          --export-method app-store-connect
+          --build-number ${{ github.run_number }}
+
+      - name: Upload to App Store Connect
+        env:
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          ipa=$(find src-tauri/gen/apple/build -name '*.ipa' | head -n 1)
+          if [ -z "$ipa" ]; then
+            echo "::error::No .ipa produced by the build"
+            exit 1
+          fi
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s' "$APPSTORE_API_PRIVATE_KEY" \
+            > ~/.appstoreconnect/private_keys/AuthKey_${APPSTORE_API_KEY_ID}.p8
+          xcrun altool --upload-app --type ios --file "$ipa" \
+            --apiKey "$APPSTORE_API_KEY_ID" --apiIssuer "$APPSTORE_API_ISSUER_ID"

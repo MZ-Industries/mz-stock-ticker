@@ -20,6 +20,8 @@ commit to a branch  →  PR  →  squash-merge to main
               DRAFT GitHub release  →  tests  →  4-platform build  →  notarize DMGs
                                     ↓ (only if everything is green)
               publish: draft=false, which CREATES THE TAG and makes latest.json live
+                                    ↓ (only if repo variable IOS_TESTFLIGHT == "true")
+              iOS build (ios.yml)  →  upload to App Store Connect / TestFlight
 ```
 
 Two things follow from that shape, and most confusion here traces back to one of them:
@@ -116,7 +118,11 @@ gh release view vX.Y.Z --json isDraft,assets --jq '{isDraft, assets: [.assets[].
 Expect `isDraft: false` and bundles for all four targets plus `latest.json` — that file is what the
 in-app updater fetches, so a release without it publishes nothing to existing users.
 
-**10. Pull `main`** afterwards to pick up the Cargo.lock sync commit.
+**10. Check TestFlight** if `IOS_TESTFLIGHT` is on: the `iOS (TestFlight)` job runs after publish.
+Its build number is the workflow run number (CFBundleVersion `X.Y.Z.<run>`), and App Store Connect
+takes several minutes to process an upload before it shows in TestFlight.
+
+**11. Pull `main`** afterwards to pick up the Cargo.lock sync commit.
 
 ## When it goes wrong
 
@@ -136,6 +142,11 @@ enabled, so published releases, their assets and their tags can never be edited 
 route forward is shipping the next patch version. For the same reason, never publish a draft release
 by hand mid-build — the workflow publishes only after every upload has landed.
 
+**The iOS job failed.** The desktop release is already published and unaffected. Re-run just that
+job (`gh run rerun <run-id> --failed`), or run `ios.yml` from the Actions tab with the tag as `ref`.
+A re-run gets a new build number, so App Store Connect never sees a duplicate. Its signing uses the
+`IOS_*` and `APPSTORE_*` secrets listed at the top of `ios.yml`, not the `APPLE_*` ones.
+
 **Someone pushed to `main` during a build.** That push meets the missing tag and can be answered
 with a downgrade PR. The publish job closes stale `release-please--*` PRs as a backstop, but avoid
 pushing to `main` while a release is building.
@@ -151,7 +162,8 @@ failing.
 
 - `.github/workflows/release.yml` — the whole pipeline, with the reasoning for the two-invocation
   split in comments at the top
-- `.github/workflows/ci.yml` — the PR checks
+- `.github/workflows/ios.yml` — the TestFlight build, called from release.yml or run by hand
+- `.github/workflows/ci.yml` — the PR checks, including an iOS `cargo check`
 - `release-please-config.json` — `draft: true`, and the `extra-files` list that keeps
   `tauri.conf.json` and `Cargo.toml` versions in step with `package.json`
 - `.release-please-manifest.json` — the current released version, and the file a downgrade PR

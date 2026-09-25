@@ -164,6 +164,12 @@ export type WatchlistDragDeps = {
   onRenderRows: () => void;
   onBadgeClick: () => void;
   setSuppressWatchlistClick: (value: boolean) => void;
+  /**
+   * Hold a row this long before it can be dragged. Touch screens need it so a
+   * swipe scrolls the list instead of reordering it; omitted, a drag starts
+   * as soon as the pointer moves.
+   */
+  holdToDragMs?: number;
 };
 
 export function setupWatchlistDragAndDrop(deps: WatchlistDragDeps): void {
@@ -174,6 +180,7 @@ export function setupWatchlistDragAndDrop(deps: WatchlistDragDeps): void {
     onRenderRows,
     onBadgeClick,
     setSuppressWatchlistClick,
+    holdToDragMs,
   } = deps;
 
   let draggingTicker: string | null = null;
@@ -182,10 +189,12 @@ export function setupWatchlistDragAndDrop(deps: WatchlistDragDeps): void {
   let draggingStartY = 0;
   let pointerDownOnBadge = false;
   let pendingDropInfo: { targetTicker: string; placeAfter: boolean } | null = null;
+  let dragArmed = false;
+  let holdTimer: number | null = null;
 
   const clearDragStyling = () => {
     watchlistListEl.querySelectorAll(".watch-row-wrap").forEach((row) => {
-      row.classList.remove("dragging", "drag-over-top", "drag-over-bottom");
+      row.classList.remove("dragging", "drag-over-top", "drag-over-bottom", "drag-armed");
     });
   };
 
@@ -244,6 +253,11 @@ export function setupWatchlistDragAndDrop(deps: WatchlistDragDeps): void {
     draggingStarted = false;
     pointerDownOnBadge = false;
     pendingDropInfo = null;
+    dragArmed = false;
+    if (holdTimer !== null) {
+      window.clearTimeout(holdTimer);
+      holdTimer = null;
+    }
     clearDragStyling();
   };
 
@@ -272,6 +286,15 @@ export function setupWatchlistDragAndDrop(deps: WatchlistDragDeps): void {
     draggingStarted = false;
     pointerDownOnBadge = Boolean(target.closest(".watch-change-badge"));
     pendingDropInfo = null;
+    dragArmed = holdToDragMs === undefined;
+    if (!dragArmed) {
+      const wrap = row.closest(".watch-row-wrap");
+      holdTimer = window.setTimeout(() => {
+        holdTimer = null;
+        dragArmed = true;
+        wrap?.classList.add("drag-armed");
+      }, holdToDragMs);
+    }
 
     try {
       row.setPointerCapture(event.pointerId);
@@ -287,6 +310,12 @@ export function setupWatchlistDragAndDrop(deps: WatchlistDragDeps): void {
 
     const movement = Math.abs(event.clientY - draggingStartY);
     if (!draggingStarted && movement < 4) {
+      return;
+    }
+
+    if (!dragArmed) {
+      // Moved before the hold completed: a scroll, not a drag or a tap.
+      cleanupPointerDrag();
       return;
     }
 
@@ -318,6 +347,15 @@ export function setupWatchlistDragAndDrop(deps: WatchlistDragDeps): void {
 
     cleanupPointerDrag();
   });
+
+  if (holdToDragMs !== undefined) {
+    // Once a row is armed, keep the finger's movement from scrolling the list.
+    watchlistListEl.addEventListener("touchmove", (event) => {
+      if (dragArmed && draggingTicker) {
+        event.preventDefault();
+      }
+    }, { passive: false });
+  }
 
   watchlistListEl.addEventListener("pointercancel", (event) => {
     if (draggingPointerId !== event.pointerId) {

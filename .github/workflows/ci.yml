@@ -60,3 +60,31 @@ jobs:
       - name: Run tests
         working-directory: src-tauri
         run: cargo test
+
+  ios-check:
+    name: iOS compile check
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # tauri::generate_context! requires the frontendDist dir (../dist) to exist
+      - name: Build frontend
+        run: npm ci && npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Keeps the #[cfg(mobile)] paths compiling without a full Xcode build.
+      - name: cargo check (aarch64-apple-ios)
+        working-directory: src-tauri
+        run: cargo check --target aarch64-apple-ios

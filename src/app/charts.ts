@@ -130,7 +130,7 @@ export type ChartController = {
   beginLinePlacement: (kind: ChartLineKind) => void;
   cancelLinePlacement: () => void;
   /** Id of the drawn line under a viewport point, if any. */
-  lineAt: (clientX: number, clientY: number) => string | null;
+  lineAt: (clientX: number, clientY: number, tolerancePx?: number) => string | null;
   dispose: () => void;
 };
 
@@ -695,7 +695,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     deps.onLinePlaced?.(anchor);
   };
 
-  const lineAt = (clientX: number, clientY: number): string | null => {
+  const lineAt = (clientX: number, clientY: number, tolerancePx = LINE_HIT_TOLERANCE_PX): string | null => {
     const hits: Array<{ id: string; distance: number }> = [];
 
     for (const { chart, container } of allPanes()) {
@@ -723,7 +723,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     }
 
     const nearest = hits
-      .filter((hit) => hit.distance <= LINE_HIT_TOLERANCE_PX)
+      .filter((hit) => hit.distance <= tolerancePx)
       .sort((a, b) => a.distance - b.distance)[0];
     return nearest?.id ?? null;
   };

@@ -7,6 +7,7 @@ import {
   syncChartLines,
 } from "./chartPanel";
 import { els } from "./elements";
+import { IS_MOBILE } from "./platform";
 import { persistPrefs, state } from "./store";
 import { escapeHtml } from "./utils";
 import type { ChartLine, ChartLineAnchor, ChartLineKind } from "./types";
@@ -24,6 +25,12 @@ const LINE_COLORS = [
 
 /** Keeps the context menu this far inside the window edges. */
 const MENU_EDGE_MARGIN_PX = 8;
+/** How long a finger must rest on a line to open its menu on touch screens. */
+const LONG_PRESS_MS = 500;
+/** Movement that turns a long-press into a pan. */
+const LONG_PRESS_SLOP_PX = 8;
+/** A fingertip is far less precise than a mouse pointer. */
+const TOUCH_LINE_HIT_TOLERANCE_PX = 16;
 
 let placingKind: ChartLineKind | null = null;
 /** The line the context menu is open on, and the symbol it belongs to. */
@@ -51,7 +58,7 @@ function writeLines(ticker: string, lines: ChartLine[]): void {
 export function syncLineToolbar(lines: ChartLine[] = chartLinesFor(chartedTicker())): void {
   const toggle = els.lineToggleEl;
   toggle.textContent = placingKind
-    ? "Click chart to place"
+    ? IS_MOBILE ? "Tap chart to place" : "Click chart to place"
     : lines.length > 0 ? `Lines (${lines.length})` : "Lines";
   toggle.classList.toggle("active", lines.length > 0 || placingKind !== null);
   toggle.classList.toggle("placing", placingKind !== null);
@@ -111,6 +118,67 @@ function openContextMenu(id: string, clientX: number, clientY: number): void {
   const maxTop = window.innerHeight - menu.offsetHeight - MENU_EDGE_MARGIN_PX;
   menu.style.left = `${Math.max(MENU_EDGE_MARGIN_PX, Math.min(clientX, maxLeft))}px`;
   menu.style.top = `${Math.max(MENU_EDGE_MARGIN_PX, Math.min(clientY, maxTop))}px`;
+}
+
+/** Opens the menu for the line under a viewport point; false if there is none. */
+function openLineMenuAt(clientX: number, clientY: number, tolerancePx?: number): boolean {
+  const id = chartLineAt(clientX, clientY, tolerancePx);
+  if (!id) {
+    return false;
+  }
+  stopPlacing();
+  setDropdownOpen(false);
+  openContextMenu(id, clientX, clientY);
+  return true;
+}
+
+/**
+ * Touch screens have no right-click, so resting a finger on a line opens its
+ * menu instead.
+ */
+function registerLongPressMenu(): void {
+  let timer: number | null = null;
+  let start: { x: number; y: number } | null = null;
+  let suppressClickUntil = 0;
+
+  const cancel = () => {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+    start = null;
+  };
+
+  els.chartStackEl.addEventListener("pointerdown", (event) => {
+    cancel();
+    if (!event.isPrimary || placingKind !== null) {
+      return;
+    }
+    const point = { x: event.clientX, y: event.clientY };
+    start = point;
+    timer = window.setTimeout(() => {
+      timer = null;
+      if (openLineMenuAt(point.x, point.y, TOUCH_LINE_HIT_TOLERANCE_PX)) {
+        // Lifting the finger fires a click, which would close the menu again.
+        suppressClickUntil = Date.now() + 700;
+      }
+    }, LONG_PRESS_MS);
+  });
+
+  els.chartStackEl.addEventListener("pointermove", (event) => {
+    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > LONG_PRESS_SLOP_PX) {
+      cancel();
+    }
+  });
+  els.chartStackEl.addEventListener("pointerup", cancel);
+  els.chartStackEl.addEventListener("pointercancel", cancel);
+
+  window.addEventListener("click", (event) => {
+    if (Date.now() < suppressClickUntil) {
+      suppressClickUntil = 0;
+      event.stopPropagation();
+    }
+  }, true);
 }
 
 function updateMenuTarget(change: (line: ChartLine) => ChartLine | null): void {
@@ -173,15 +241,14 @@ export function initChartLines(): void {
   });
 
   els.chartStackEl.addEventListener("contextmenu", (event) => {
-    const id = chartLineAt(event.clientX, event.clientY);
-    if (!id) {
-      return;
+    if (openLineMenuAt(event.clientX, event.clientY)) {
+      event.preventDefault();
     }
-    event.preventDefault();
-    stopPlacing();
-    setDropdownOpen(false);
-    openContextMenu(id, event.clientX, event.clientY);
   });
+
+  if (IS_MOBILE) {
+    registerLongPressMenu();
+  }
 
   // Hints that a line can be right-clicked.
   els.chartStackEl.addEventListener("mousemove", (event) => {

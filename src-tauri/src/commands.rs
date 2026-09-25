@@ -587,3 +587,10 @@ pub async fn fetch_news(ticker: String, limit: u8) -> Result<Vec<NewsItem>, Stri
 
     Ok(items)
 }
+
+/// The OS the app was built for (`macos`, `windows`, `linux`, `ios`,
+/// `android`), so the frontend can pick its layout and input handling.
+#[tauri::command]
+pub fn app_platform() -> &'static str {
+    std::env::consts::OS
+}

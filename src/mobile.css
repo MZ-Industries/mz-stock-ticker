@@ -1,0 +1,277 @@
+/*
+ * iOS / Android only. Every rule is scoped under `html.is-mobile`, which
+ * `platform.ts` sets from the backend's build target, so none of this can
+ * reach the desktop app.
+ */
+
+/* ---- Every mobile screen ---- */
+
+html.is-mobile,
+html.is-mobile body,
+html.is-mobile #app {
+  height: 100dvh;
+}
+
+html.is-mobile #app {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+
+html.is-mobile .status-line {
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+}
+
+/* Fingers need bigger targets than the desktop's 12px pills. */
+html.is-mobile .pill {
+  min-height: 36px;
+  font-size: 13px;
+}
+
+html.is-mobile .watch-row {
+  min-height: 48px;
+  cursor: default;
+  -webkit-touch-callout: none;
+}
+
+/* Vertical swipes scroll the list; a held row can still be dragged. */
+html.is-mobile .watch-row-wrap {
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html.is-mobile .watch-row-wrap.drag-armed .watch-row {
+  border-color: rgba(45, 212, 191, 0.7);
+  background: rgba(45, 212, 191, 0.1);
+}
+
+html.is-mobile .watch-remove {
+  min-width: 36px;
+  min-height: 36px;
+}
+
+/* Font size under 16px makes iOS zoom the page when a field gains focus. */
+html.is-mobile input,
+html.is-mobile select {
+  font-size: 16px;
+}
+
+html.is-mobile .splitter {
+  min-width: 14px;
+  min-height: 14px;
+}
+
+html.is-mobile .chart-stack {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html.is-mobile .line-option {
+  min-height: 40px;
+}
+
+html.is-mobile .line-swatch {
+  width: 30px;
+  height: 30px;
+}
+
+/* The tab bar and Reset button only appear in the phone layout below. */
+html.is-mobile .mobile-tabbar,
+html.is-mobile .mobile-reset {
+  display: none;
+}
+
+/* ---- Phones and narrow iPad windows: one region at a time ---- */
+
+@media (max-width: 899px) {
+  html.is-mobile #app {
+    grid-template-rows: 1fr auto auto;
+  }
+
+  html.is-mobile .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
+    min-height: 0;
+  }
+
+  html.is-mobile .splitter.vertical,
+  html.is-mobile #news-splitter {
+    display: none;
+  }
+
+  html.is-mobile .watchlist {
+    border: 0;
+    padding: 12px 16px;
+  }
+
+  html.is-mobile .main-panel {
+    min-height: 0;
+  }
+
+  /* Symbols tab */
+  html.is-mobile .app-shell:not([data-tab="watchlist"]) .watchlist {
+    display: none;
+  }
+
+  html.is-mobile .app-shell[data-tab="watchlist"] .main-panel {
+    display: none;
+  }
+
+  /* Chart tab: the chart takes whatever height the header rows leave. */
+  html.is-mobile .app-shell[data-tab="chart"] .main-panel {
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  html.is-mobile .app-shell[data-tab="chart"] .news-panel {
+    display: none;
+  }
+
+  /* News tab */
+  html.is-mobile .app-shell[data-tab="news"] .main-panel {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  html.is-mobile .app-shell[data-tab="news"] .main-panel > :not(.news-panel) {
+    display: none;
+  }
+
+  html.is-mobile .news-panel {
+    padding: 12px 16px 16px;
+  }
+
+  html.is-mobile .news-grid {
+    grid-template-columns: 1fr;
+  }
+
+  html.is-mobile .topbar {
+    padding: 10px 16px 2px;
+  }
+
+  html.is-mobile h1 {
+    font-size: 24px;
+  }
+
+  /* Controls become a single row that scrolls sideways. */
+  html.is-mobile .controls {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding: 6px 16px 8px;
+    scrollbar-width: none;
+  }
+
+  /*
+   * Fade the right edge so it is clear the row scrolls sideways. Not on
+   * .controls: a mask clips descendants, which would hide its dropdown sheets.
+   */
+  html.is-mobile .provider-summary {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+
+  html.is-mobile .controls::-webkit-scrollbar {
+    display: none;
+  }
+
+  html.is-mobile .controls > * {
+    flex: none;
+  }
+
+  /* Lines, Studies and Reset lead the row so they are visible without scrolling. */
+  html.is-mobile .chart-tools {
+    order: -1;
+  }
+
+  html.is-mobile .stats-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 6px 16px 4px;
+    scrollbar-width: none;
+  }
+
+  html.is-mobile .stat-cell {
+    flex: none;
+  }
+
+  html.is-mobile .mobile-reset {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /*
+   * The scrolling controls row would clip the dropdowns, so they become
+   * sheets pinned to the bottom of the screen.
+   */
+  html.is-mobile .line-dropdown,
+  html.is-mobile .study-menu,
+  html.is-mobile .line-context-menu {
+    position: fixed;
+    top: auto !important;
+    right: 12px;
+    left: 12px !important;
+    bottom: calc(64px + env(safe-area-inset-bottom));
+    width: auto;
+    z-index: 70;
+  }
+
+  html.is-mobile .study-menu {
+    max-height: 60dvh;
+  }
+
+  html.is-mobile .provider-toolbar {
+    padding: 6px 12px;
+  }
+
+  html.is-mobile .status-line {
+    padding-bottom: 6px;
+  }
+
+  html.is-mobile .provider-summary {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  html.is-mobile .provider-summary > * {
+    flex: none;
+  }
+
+  html.is-mobile .mobile-tabbar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--border);
+    background: rgba(6, 10, 18, 0.96);
+    padding: 0 0 env(safe-area-inset-bottom);
+  }
+
+  html.is-mobile .mobile-tab {
+    min-height: 52px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  html.is-mobile .mobile-tab.active {
+    color: var(--accent);
+  }
+
+  /* Settings fills the screen instead of floating as a dialog. */
+  html.is-mobile .prefs-overlay {
+    padding: 0;
+  }
+
+  html.is-mobile .prefs-panel {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

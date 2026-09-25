@@ -8,23 +8,32 @@ import {
   registerGlobalEventHandlers,
   registerWatchlistEventHandlers,
 } from "./app/lifecycle";
+import { initPlatform } from "./app/platform";
 import { APP_TEMPLATE } from "./app/template";
 
-const root = document.querySelector("#app") as HTMLDivElement;
-root.innerHTML = APP_TEMPLATE;
+async function main(): Promise<void> {
+  // Layout and input handling depend on the platform, so learn it before the
+  // first render.
+  await initPlatform();
 
-initElements(root);
-initChartPanel({
-  onNeedOlderData: () => {
-    void loadOlderBars();
-  },
-  onLinePlaced: addChartLine,
-  onLinesShown: syncLineToolbar,
-});
-initChartLines();
+  const root = document.querySelector("#app") as HTMLDivElement;
+  root.innerHTML = APP_TEMPLATE;
 
-registerWatchlistEventHandlers();
-registerGlobalEventHandlers();
-registerBeforeUnloadHandler();
+  initElements(root);
+  initChartPanel({
+    onNeedOlderData: () => {
+      void loadOlderBars();
+    },
+    onLinePlaced: addChartLine,
+    onLinesShown: syncLineToolbar,
+  });
+  initChartLines();
 
-void bootstrapApp();
+  registerWatchlistEventHandlers();
+  registerGlobalEventHandlers();
+  registerBeforeUnloadHandler();
+
+  await bootstrapApp();
+}
+
+void main();
