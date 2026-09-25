@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.6.0...v0.7.0) (2026-09-25)
+
+
+### Features
+
+* iOS app for iPhone and iPad ([646c105](https://github.com/MZ-Industries/mz-stock-ticker/commit/646c105e8de378e8490b02a74976127eb87d455a))
+
+
+### Bug Fixes
+
+* stop pinches from zooming the whole app on mobile ([95a2401](https://github.com/MZ-Industries/mz-stock-ticker/commit/95a24013a71097baf4101d3a661501767df249f3))
+* use the real app icon on iOS ([6f1a2bf](https://github.com/MZ-Industries/mz-stock-ticker/commit/6f1a2bf4ba0c5faad1f3596f6fa02f7d8c39087d))
+
 ## [0.6.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.5.3...v0.6.0) (2026-09-23)
 
 
