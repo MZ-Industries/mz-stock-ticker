@@ -33,3 +33,6 @@ dist-ssr
 
 # Claude Code: local settings stay local, .claude/skills/ is shared
 .claude/settings.local.json
+
+# Photo-app sidecar metadata (not icons)
+*.on1
