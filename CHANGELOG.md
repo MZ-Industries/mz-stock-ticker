@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.0...v0.8.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* keep fixed-range study axes from showing ticks past their bounds ([23d06f5](https://github.com/MZ-Industries/mz-stock-ticker/commit/23d06f5cc25693c7ae67cac7436705920230c937))
+* let the volume and study panes be resized against each other ([0537e43](https://github.com/MZ-Industries/mz-stock-ticker/commit/0537e43483ddac0fa05d52d4bc2f9fc4898e80ad))
+
 ## [0.8.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.7.0...v0.8.0) (2026-09-28)
 
 
