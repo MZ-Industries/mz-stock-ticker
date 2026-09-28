@@ -7,13 +7,16 @@ import {
   fmtPct,
   formatAxisTime,
   isRateLimitError,
+  lowerPaneHeights,
   normalizeChartLinesByTicker,
+  normalizeLowerPaneWeights,
   normalizeMovingAveragePeriods,
   normalizeStoredRatio,
   normalizeTicker,
   normalizeVisibleRangesByViewKey,
   normalizeWatchlistSymbols,
   parseRetryAfterSeconds,
+  splitPaneWeights,
 } from "../utils";
 
 describe("parseRetryAfterSeconds", () => {
@@ -169,5 +172,68 @@ describe("normalizeChartLinesByTicker", () => {
       MSFT: "nope",
     })).toEqual({});
     expect(normalizeChartLinesByTicker(null)).toEqual({});
+  });
+});
+
+describe("splitPaneWeights", () => {
+  const even = { heightPx: 200, weight: 1 };
+
+  it("moves height from the pane below to the pane above", () => {
+    const [above, below] = splitPaneWeights(even, even, 100, 84);
+    expect(above).toBeCloseTo(1.5);
+    expect(below).toBeCloseTo(0.5);
+  });
+
+  it("conserves the pair's combined weight", () => {
+    const [above, below] = splitPaneWeights({ heightPx: 300, weight: 3 }, { heightPx: 100, weight: 1 }, -50, 84);
+    expect(above + below).toBeCloseTo(4);
+  });
+
+  it("never shrinks either pane below the minimum", () => {
+    expect(splitPaneWeights(even, even, 1000, 84)[1]).toBeCloseTo((84 / 400) * 2);
+    expect(splitPaneWeights(even, even, -1000, 84)[0]).toBeCloseTo((84 / 400) * 2);
+  });
+
+  it("leaves the weights alone when there is nothing to split", () => {
+    expect(splitPaneWeights({ heightPx: 0, weight: 2 }, { heightPx: 0, weight: 1 }, 50, 84)).toEqual([2, 1]);
+  });
+});
+
+describe("normalizeLowerPaneWeights", () => {
+  it("keeps valid weights and clamps extremes", () => {
+    expect(normalizeLowerPaneWeights({ volume: 1.5, rsi: 0.01, macd: 500 })).toEqual({
+      volume: 1.5,
+      rsi: 0.1,
+      macd: 20,
+    });
+  });
+
+  it("drops junk", () => {
+    expect(normalizeLowerPaneWeights({ volume: -1, rsi: "2", macd: Number.NaN })).toEqual({});
+    expect(normalizeLowerPaneWeights(null)).toEqual({});
+    expect(normalizeLowerPaneWeights([1, 2])).toEqual({});
+  });
+});
+
+describe("lowerPaneHeights", () => {
+  it("shares the space by weight", () => {
+    expect(lowerPaneHeights(400, [1, 1, 2], 40, 84)).toEqual([100, 100, 200]);
+  });
+
+  it("keeps a squeezed pane at the floor and shares the rest", () => {
+    const heights = lowerPaneHeights(300, [0.1, 1, 1], 40, 84);
+    expect(heights[0]).toBe(40);
+    expect(heights[1]).toBeCloseTo(130);
+    expect(heights[2]).toBeCloseTo(130);
+  });
+
+  it("falls back to equal comfortable heights, and scrolling, when space runs out", () => {
+    expect(lowerPaneHeights(200, [3, 1, 1], 40, 84)).toEqual([84, 84, 84]);
+  });
+
+  it("always fills the space it is given", () => {
+    const heights = lowerPaneHeights(517, [0.2, 5, 1, 0.3], 40, 84);
+    expect(heights.reduce((sum, height) => sum + height, 0)).toBeCloseTo(517);
+    expect(Math.min(...heights)).toBeGreaterThanOrEqual(40);
   });
 });

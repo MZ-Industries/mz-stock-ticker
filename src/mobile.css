@@ -65,6 +65,8 @@ html.is-mobile select {
 html.is-mobile .splitter {
   min-width: 14px;
   min-height: 14px;
+  /* Dragging a splitter must not scroll the pane strip underneath it. */
+  touch-action: none;
 }
 
 html.is-mobile .chart-stack {

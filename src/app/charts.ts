@@ -16,7 +16,17 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { clamp, fmtCompact, fmtNumber, formatAxisTime, formatTooltipTime, getNyParts } from "./utils";
+import {
+  clamp,
+  fmtCompact,
+  fmtNumber,
+  formatAxisTime,
+  formatTooltipTime,
+  getNyParts,
+  lowerPaneHeights,
+  normalizeLowerPaneWeights,
+  splitPaneWeights,
+} from "./utils";
 import { getStudy, type StudyPlot, type StudyRange, type StudyResult } from "./studies";
 import type { AggregateBar, ChartLine, ChartLineAnchor, ChartLineKind, ChartType, RangePreset } from "./types";
 
@@ -59,6 +69,10 @@ const SPLITTER_HEIGHT_PX = 8;
  * strip scrolls instead of squeezing them all into a few pixels.
  */
 const MIN_LOWER_PANE_PX = 84;
+/** How small a user may drag a lower pane, taking the room for another. */
+const MIN_DRAGGED_PANE_PX = 40;
+/** Weight key for the volume pane among the lower panes. */
+const VOLUME_PANE_KEY = "volume";
 
 /** How close a right-click has to land to a drawn line to pick it. */
 const LINE_HIT_TOLERANCE_PX = 5;
@@ -76,6 +90,10 @@ export type ChartControllerDeps = {
   onVisibleRangeChange: (viewKey: string, range: VisibleRange) => void;
   /** Share of the chart stack the user has dragged the price pane to (0-1). */
   getPricePaneRatio: () => number;
+  /** Relative heights of the volume and study panes, keyed by pane. */
+  getLowerPaneWeights: () => Record<string, number>;
+  /** Fired once a drag between two lower panes finishes. */
+  onLowerPaneWeightsChange: (weights: Record<string, number>) => void;
   /** Fired when the user scrolls close to the oldest loaded bar. */
   onNeedOlderData?: () => void;
   /** Fired when a click lands while a line is being placed. */
@@ -364,6 +382,8 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   /** Overlay study plots drawn on the price pane, keyed `study:plot`. */
   const overlaySeries = new Map<string, ManagedSeries>();
   let studyPanes: StudyPane[] = [];
+  /** Splitters between neighbouring lower panes, rebuilt with the pane list. */
+  let lowerSplitters: HTMLDivElement[] = [];
   let studyResults = new Map<string, StudyResult>();
   let resizeObserver: ResizeObserver | null = null;
 
@@ -885,6 +905,109 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     }
   };
 
+  /** Volume first, then each study pane in the order the studies are listed. */
+  const lowerPanes = (): Array<{ key: string; container: HTMLDivElement }> => [
+    { key: VOLUME_PANE_KEY, container: volumeContainer },
+    ...studyPanes.map((pane) => ({ key: pane.studyKey, container: pane.container })),
+  ];
+
+  /** Sizes the lower pane rows from their weights and the strip's height. */
+  const applyLowerPaneRows = (weights: Record<string, number> = deps.getLowerPaneWeights()): void => {
+    const panes = lowerPanes();
+    const availablePx = lowerPanesContainer.clientHeight - SPLITTER_HEIGHT_PX * (panes.length - 1);
+    const rows = lowerPaneHeights(
+      availablePx,
+      panes.map(({ key }) => weights[key] ?? 1),
+      MIN_DRAGGED_PANE_PX,
+      MIN_LOWER_PANE_PX,
+    )
+      .map((height) => `${height.toFixed(2)}px`)
+      .join(` ${SPLITTER_HEIGHT_PX}px `);
+
+    if (lowerPanesContainer.style.gridTemplateRows !== rows) {
+      lowerPanesContainer.style.gridTemplateRows = rows;
+    }
+  };
+
+  /**
+   * Lays out the panes under the price chart with a splitter between each
+   * neighbouring pair. Each pane's height follows its stored weight.
+   */
+  const applyLowerPaneLayout = (): void => {
+    for (const splitter of lowerSplitters) {
+      splitter.remove();
+    }
+    lowerSplitters = [];
+
+    const panes = lowerPanes();
+    panes.forEach(({ container }, index) => {
+      if (index > 0) {
+        const splitter = createLowerSplitter(panes[index - 1].key, panes[index].key);
+        lowerSplitters.push(splitter);
+        lowerPanesContainer.append(splitter);
+      }
+      lowerPanesContainer.append(container);
+    });
+
+    applyLowerPaneRows();
+  };
+
+  /** A splitter that moves height between the two panes either side of it. */
+  const createLowerSplitter = (aboveKey: string, belowKey: string): HTMLDivElement => {
+    const splitter = document.createElement("div");
+    splitter.className = "splitter horizontal lower-pane-splitter";
+    splitter.setAttribute("role", "separator");
+    splitter.setAttribute("aria-orientation", "horizontal");
+
+    splitter.addEventListener("pointerdown", (event) => {
+      const panes = lowerPanes();
+      const above = panes.find((pane) => pane.key === aboveKey)?.container;
+      const below = panes.find((pane) => pane.key === belowKey)?.container;
+      if (!above || !below) {
+        return;
+      }
+
+      event.preventDefault();
+      const startY = event.clientY;
+      const stored = deps.getLowerPaneWeights();
+      const start = {
+        above: { heightPx: above.getBoundingClientRect().height, weight: stored[aboveKey] ?? 1 },
+        below: { heightPx: below.getBoundingClientRect().height, weight: stored[belowKey] ?? 1 },
+      };
+      let weights = stored;
+
+      const onMove = (moveEvent: PointerEvent) => {
+        const [aboveWeight, belowWeight] = splitPaneWeights(
+          start.above,
+          start.below,
+          moveEvent.clientY - startY,
+          MIN_DRAGGED_PANE_PX,
+        );
+        weights = { ...stored, [aboveKey]: aboveWeight, [belowKey]: belowWeight };
+        applyLowerPaneRows(weights);
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        if (weights !== stored) {
+          deps.onLowerPaneWeightsChange(normalizeLowerPaneWeights(weights));
+        }
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    });
+
+    // Double-click evens out every pane under the price chart.
+    splitter.addEventListener("dblclick", () => {
+      deps.onLowerPaneWeightsChange({});
+      applyLowerPaneRows({});
+    });
+
+    return splitter;
+  };
+
   const createStudyPane = (studyKey: string): StudyPane => {
     const container = document.createElement("div");
     container.className = "study-chart";
@@ -967,6 +1090,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     studyPanes = next;
 
     if (changed) {
+      applyLowerPaneLayout();
       applyPaneLayout();
       applyTimeAxisOptions();
     }
@@ -1003,8 +1127,10 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     connectChart(volumeChart);
 
     resizeObserver = new ResizeObserver(() => {
-      // A shorter window changes how much the price pane may keep.
+      // A shorter window changes how much the price pane may keep, and so
+      // how much the lower panes have to share.
       applyPaneLayout();
+      applyLowerPaneRows();
       priceChart?.resize(priceContainer.clientWidth, priceContainer.clientHeight);
       volumeChart?.resize(volumeContainer.clientWidth, volumeContainer.clientHeight);
       for (const pane of studyPanes) {
@@ -1014,10 +1140,14 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     });
 
     resizeObserver.observe(stackContainer);
+    // Its rows are fixed pixel heights, so the panes inside it do not resize
+    // when the price/volume splitter moves - the strip itself has to be watched.
+    resizeObserver.observe(lowerPanesContainer);
     for (const container of allContainers()) {
       resizeObserver.observe(container);
     }
 
+    applyLowerPaneLayout();
     applyPaneLayout();
   };
 

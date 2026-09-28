@@ -13,6 +13,7 @@ import { currentChartViewKey, persistPrefs, state } from "./store";
 import { normalizeStudyKeys } from "./studies";
 import {
   normalizeChartLinesByTicker,
+  normalizeLowerPaneWeights,
   normalizeMovingAveragePeriods,
   normalizeVisibleRangesByViewKey,
   normalizeWatchlistSymbols,
@@ -66,6 +67,7 @@ export async function initPrefs(): Promise<void> {
       : "5m";
 
   prefs.chartLinesByTicker = normalizeChartLinesByTicker(prefs.chartLinesByTicker);
+  prefs.lowerPaneWeights = normalizeLowerPaneWeights(prefs.lowerPaneWeights);
 
   hydrateVisibleRangeState();
   persistPrefs();

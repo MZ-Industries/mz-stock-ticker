@@ -3,7 +3,7 @@ import { RIGHT_SCALE_WIDTH_PX } from "./constants";
 import { els } from "./elements";
 import { clearSessionShading, renderSessionShading } from "./market";
 import { getStoredVisibleRange, onVisibleRangeChange } from "./prefs";
-import { currentAggregationPreset, currentChartResetKey, currentChartViewKey, state } from "./store";
+import { currentAggregationPreset, currentChartResetKey, currentChartViewKey, persistPrefs, state } from "./store";
 import { getNyParts } from "./utils";
 import type { AggregateBar, ChartLine, ChartLineAnchor, ChartLineKind } from "./types";
 
@@ -36,6 +36,11 @@ export function initChartPanel(options: ChartPanelOptions = {}): void {
     clearSessionShading,
     getStoredVisibleRange,
     getPricePaneRatio: () => state.prefs.pricePaneHeight,
+    getLowerPaneWeights: () => state.prefs.lowerPaneWeights ?? {},
+    onLowerPaneWeightsChange: (weights) => {
+      state.prefs.lowerPaneWeights = weights;
+      persistPrefs();
+    },
     onVisibleRangeChange: (viewKey, range) => {
       // 1D always opens on the latest session, so persisting its zoom would
       // only replay a stale window over a series whose length keeps changing.

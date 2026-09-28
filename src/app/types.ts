@@ -127,6 +127,11 @@ export type AppPrefs = {
   visibleRangesByViewKey?: Record<string, { from: number; to: number }>;
   /** Lines the user has drawn, per symbol. */
   chartLinesByTicker?: Record<string, ChartLine[]>;
+  /**
+   * Relative heights of the panes under the price chart, keyed by "volume" or
+   * a study key. Missing panes weigh 1, so a new study gets an equal share.
+   */
+  lowerPaneWeights?: Record<string, number>;
   sidebarWidth: number;
   pricePaneHeight: number;
   chartAreaHeight: number;

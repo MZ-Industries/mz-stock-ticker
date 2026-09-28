@@ -161,6 +161,84 @@ function normalizeChartLine(value: unknown): ChartLine | null {
   return null;
 }
 
+/** Weights outside this span are clamped, so one pane can never swallow the rest. */
+export const MIN_PANE_WEIGHT = 0.1;
+export const MAX_PANE_WEIGHT = 20;
+
+export function normalizeLowerPaneWeights(input: unknown): Record<string, number> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return {};
+  }
+
+  const result: Record<string, number> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      result[key] = clamp(MIN_PANE_WEIGHT, MAX_PANE_WEIGHT, value);
+    }
+  }
+  return result;
+}
+
+/**
+ * New weights for two neighbouring panes after their shared splitter moves by
+ * `deltaPx`. Only those two panes change: their combined height and weight are
+ * conserved, and neither drops below `minPx`.
+ */
+export function splitPaneWeights(
+  above: { heightPx: number; weight: number },
+  below: { heightPx: number; weight: number },
+  deltaPx: number,
+  minPx: number,
+): [number, number] {
+  const totalPx = above.heightPx + below.heightPx;
+  const totalWeight = above.weight + below.weight;
+  if (totalPx <= 0 || totalWeight <= 0) {
+    return [above.weight, below.weight];
+  }
+
+  const floor = Math.min(minPx, totalPx / 2);
+  const abovePx = clamp(floor, totalPx - floor, above.heightPx + deltaPx);
+  const aboveWeight = (totalWeight * abovePx) / totalPx;
+  return [aboveWeight, totalWeight - aboveWeight];
+}
+
+/**
+ * Pixel heights for the panes under the price chart. Space is shared out by
+ * weight, but no pane drops below `minPx`. When there is not room for every
+ * pane at `comfortablePx`, they all get that height and the strip scrolls.
+ */
+export function lowerPaneHeights(
+  availablePx: number,
+  weights: number[],
+  minPx: number,
+  comfortablePx: number,
+): number[] {
+  if (availablePx < weights.length * comfortablePx) {
+    return weights.map(() => comfortablePx);
+  }
+
+  const heights: Array<number | null> = weights.map(() => null);
+  // Pin any pane its share would squeeze below the floor, then share the rest
+  // among the others; repeat until every share clears the floor.
+  for (;;) {
+    const open = heights.flatMap((height, index) => (height === null ? [index] : []));
+    const pinnedPx = heights.reduce<number>((sum, height) => sum + (height ?? 0), 0);
+    const openWeight = open.reduce((sum, index) => sum + weights[index], 0);
+    const remainingPx = availablePx - pinnedPx;
+
+    const squeezed = open.filter((index) => (remainingPx * weights[index]) / openWeight < minPx);
+    if (squeezed.length === 0) {
+      for (const index of open) {
+        heights[index] = (remainingPx * weights[index]) / openWeight;
+      }
+      return heights as number[];
+    }
+    for (const index of squeezed) {
+      heights[index] = minPx;
+    }
+  }
+}
+
 /** Drops malformed lines, and symbols left with none. */
 export function normalizeChartLinesByTicker(input: unknown): Record<string, ChartLine[]> {
   if (!input || typeof input !== "object") {
