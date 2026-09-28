@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.7.0...v0.8.0) (2026-09-28)
+
+
+### Features
+
+* pin bounded studies to their full scale on the Y axis ([b4886db](https://github.com/MZ-Industries/mz-stock-ticker/commit/b4886db745108b87d08c4957bf70532ed0e4ee7e))
+
 ## [0.7.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.6.0...v0.7.0) (2026-09-25)
 
 
