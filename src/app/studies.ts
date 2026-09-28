@@ -45,7 +45,14 @@ export type StudyResult = {
   compact?: boolean;
   /** Decimals shown in the study legend. */
   precision?: number;
+  /**
+   * Pins the pane's Y axis to this span whatever the data does, so a bounded
+   * oscillator always reads against its full scale.
+   */
+  range?: StudyRange;
 };
+
+export type StudyRange = { min: number; max: number };
 
 export type StudyContext = {
   bars: AggregateBar[];
@@ -59,6 +66,10 @@ export type StudyDefinition = {
   placement: StudyPlacement;
   compute: (context: StudyContext) => StudyResult;
 };
+
+/** Bounded scores always show their whole scale: 0-100, or -100-0 for %R. */
+const PERCENT_RANGE: StudyRange = { min: 0, max: 100 };
+const NEGATIVE_PERCENT_RANGE: StudyRange = { min: -100, max: 0 };
 
 const BLUE = "#60a5fa";
 const TEAL = "#2dd4bf";
@@ -147,6 +158,7 @@ export const STUDIES: StudyDefinition[] = [
           line("adx", "ADX", adx, BLUE, { lineWidth: 2 }),
         ],
         levels: [{ value: 20, color: SLATE, dashed: true }],
+        range: PERCENT_RANGE,
       };
     },
   },
@@ -177,6 +189,7 @@ export const STUDIES: StudyDefinition[] = [
           { value: 70, color: SLATE, dashed: true },
           { value: 30, color: SLATE, dashed: true },
         ],
+        range: PERCENT_RANGE,
       };
     },
   },
@@ -546,6 +559,7 @@ export const STUDIES: StudyDefinition[] = [
         { value: 60, color: SLATE, dashed: true },
         { value: 40, color: SLATE, dashed: true },
       ],
+      range: PERCENT_RANGE,
     }),
   },
   {
@@ -559,6 +573,7 @@ export const STUDIES: StudyDefinition[] = [
         { value: 50, color: SLATE, dashed: true },
         { value: 30, color: UP, dashed: true },
       ],
+      range: PERCENT_RANGE,
     }),
   },
   {
@@ -599,6 +614,7 @@ export const STUDIES: StudyDefinition[] = [
           { value: 80, color: DOWN, dashed: true },
           { value: 20, color: UP, dashed: true },
         ],
+        range: PERCENT_RANGE,
       };
     },
   },
@@ -655,6 +671,7 @@ export const STUDIES: StudyDefinition[] = [
         { value: 70, color: DOWN, dashed: true },
         { value: 30, color: UP, dashed: true },
       ],
+      range: PERCENT_RANGE,
     }),
   },
   {
@@ -731,6 +748,7 @@ export const STUDIES: StudyDefinition[] = [
         { value: -20, color: DOWN, dashed: true },
         { value: -80, color: UP, dashed: true },
       ],
+      range: NEGATIVE_PERCENT_RANGE,
     }),
   },
   {

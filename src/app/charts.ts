@@ -17,7 +17,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { clamp, fmtCompact, fmtNumber, formatAxisTime, formatTooltipTime, getNyParts } from "./utils";
-import { getStudy, type StudyPlot, type StudyResult } from "./studies";
+import { getStudy, type StudyPlot, type StudyRange, type StudyResult } from "./studies";
 import type { AggregateBar, ChartLine, ChartLineAnchor, ChartLineKind, ChartType, RangePreset } from "./types";
 
 export type VisibleRange = { from: number; to: number };
@@ -248,19 +248,32 @@ function addPriceSeries(chart: IChartApi, chartType: ChartType): ISeriesApi<Seri
 }
 
 /** Identifies a plot's visual style, so only real restyles recreate a series. */
-function plotStyleKey(plot: StudyPlot): string {
+function plotStyleKey(plot: StudyPlot, range?: StudyRange): string {
   return [
     plot.type,
     plot.color,
     plot.lineWidth ?? 1,
     plot.dashed ? "dashed" : "solid",
     plot.underlay ? "underlay" : "scaled",
+    range ? `${range.min}:${range.max}` : "auto",
   ].join("|");
 }
 
-function createPlotSeries(chart: IChartApi, plot: StudyPlot): ISeriesApi<SeriesType> {
+/** Autoscale that always reports the study's fixed span. */
+function fixedRangeOptions(range: StudyRange | undefined) {
+  return range
+    ? { autoscaleInfoProvider: () => ({ priceRange: { minValue: range.min, maxValue: range.max } }) }
+    : {};
+}
+
+function createPlotSeries(
+  chart: IChartApi,
+  plot: StudyPlot,
+  range?: StudyRange,
+): ISeriesApi<SeriesType> {
   if (plot.type === "histogram") {
     const series = chart.addSeries(HistogramSeries, {
+      ...fixedRangeOptions(range),
       color: plot.color,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -281,6 +294,7 @@ function createPlotSeries(chart: IChartApi, plot: StudyPlot): ISeriesApi<SeriesT
   }
 
   const base = {
+    ...fixedRangeOptions(range),
     color: plot.color,
     lineWidth: (plot.lineWidth ?? 1) as LineWidth,
     lineStyle: plot.dashed ? LineStyle.Dashed : LineStyle.Solid,
@@ -1109,6 +1123,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     store: Map<string, ManagedSeries>,
     keyPrefix: string,
     plots: StudyPlot[],
+    range?: StudyRange,
   ): void => {
     for (const plot of plots) {
       const key = `${keyPrefix}:${plot.key}`;
@@ -1123,7 +1138,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
         continue;
       }
 
-      const styleKey = plotStyleKey(plot);
+      const styleKey = plotStyleKey(plot, range);
       let managed = existing;
 
       // Same recreate-instead-of-applyOptions rule as the moving averages:
@@ -1135,7 +1150,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       }
 
       if (!managed) {
-        managed = { series: createPlotSeries(chart, plot), styleKey };
+        managed = { series: createPlotSeries(chart, plot, range), styleKey };
         store.set(key, managed);
       }
 
@@ -1240,7 +1255,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
         continue;
       }
 
-      applyPlots(pane.chart, pane.series, pane.studyKey, result.plots);
+      applyPlots(pane.chart, pane.series, pane.studyKey, result.plots, result.range);
       pruneSeries(
         pane.chart,
         pane.series,

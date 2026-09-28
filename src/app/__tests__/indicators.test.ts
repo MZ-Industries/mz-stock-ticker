@@ -228,6 +228,42 @@ describe("study catalogue", () => {
     },
   );
 
+  // Bounded scores always show their whole scale on the Y axis.
+  const BOUNDED_STUDIES: Record<string, [number, number]> = {
+    rsi: [0, 100],
+    stochastics: [0, 100],
+    aroon: [0, 100],
+    "ultimate-oscillator": [0, 100],
+    "relative-volatility": [0, 100],
+    "adx-dms": [0, 100],
+    "williams-r": [-100, 0],
+  };
+
+  it("pins exactly the bounded studies to their full scale", () => {
+    const pinned: Record<string, [number, number]> = {};
+    for (const study of STUDIES) {
+      const range = study.compute({ bars, timespan: "hour", multiplier: 1 }).range;
+      if (range) {
+        pinned[study.key] = [range.min, range.max];
+      }
+    }
+    expect(pinned).toEqual(BOUNDED_STUDIES);
+  });
+
+  it.each(Object.entries(BOUNDED_STUDIES))("%s stays within its pinned range", (key, [min, max]) => {
+    const study = STUDIES.find((item) => item.key === key)!;
+    const result = study.compute({ bars, timespan: "hour", multiplier: 1 });
+
+    for (const plot of result.plots) {
+      for (const value of plot.values) {
+        if (value !== null) {
+          expect(value).toBeGreaterThanOrEqual(min);
+          expect(value).toBeLessThanOrEqual(max);
+        }
+      }
+    }
+  });
+
   it("drops unknown and duplicate study keys", () => {
     expect(normalizeStudyKeys(["rsi", "rsi", "not-a-study", 7])).toEqual(["rsi"]);
     expect(normalizeStudyKeys("rsi")).toEqual([]);
