@@ -390,6 +390,12 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   let studyPanes: StudyPane[] = [];
   /** Splitters between neighbouring lower panes, rebuilt with the pane list. */
   let lowerSplitters: HTMLDivElement[] = [];
+  /**
+   * Weights while a splitter is being dragged. They are only saved on release,
+   * and the resize observer re-lays the rows on every step of the drag, so it
+   * has to see these rather than the saved ones.
+   */
+  let draggingLowerWeights: Record<string, number> | null = null;
   let studyResults = new Map<string, StudyResult>();
   let resizeObserver: ResizeObserver | null = null;
 
@@ -918,7 +924,9 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   ];
 
   /** Sizes the lower pane rows from their weights and the strip's height. */
-  const applyLowerPaneRows = (weights: Record<string, number> = deps.getLowerPaneWeights()): void => {
+  const applyLowerPaneRows = (
+    weights: Record<string, number> = draggingLowerWeights ?? deps.getLowerPaneWeights(),
+  ): void => {
     const panes = lowerPanes();
     const availablePx = lowerPanesContainer.clientHeight - SPLITTER_HEIGHT_PX * (panes.length - 1);
     const rows = lowerPaneHeights(
@@ -990,15 +998,18 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
           MIN_DRAGGED_PANE_PX,
         );
         weights = { ...stored, [aboveKey]: aboveWeight, [belowKey]: belowWeight };
+        draggingLowerWeights = weights;
         applyLowerPaneRows(weights);
       };
       const onUp = () => {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
+        draggingLowerWeights = null;
         if (weights !== stored) {
           deps.onLowerPaneWeightsChange(normalizeLowerPaneWeights(weights));
         }
+        applyLowerPaneRows();
       };
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
