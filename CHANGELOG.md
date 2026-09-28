@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.2](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.1...v0.8.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* keep lower pane charts sized to their panes while dragging ([8aee281](https://github.com/MZ-Industries/mz-stock-ticker/commit/8aee281ee470334ca3edf01b66d9dc6f3655d812))
+* stop tall 0-100 study panes from showing 120 on the axis ([9fd61b3](https://github.com/MZ-Industries/mz-stock-ticker/commit/9fd61b3aaf2d8bfbd76404f0f02cb441cb181edf))
+
 ## [0.8.1](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.0...v0.8.1) (2026-09-28)
 
 
