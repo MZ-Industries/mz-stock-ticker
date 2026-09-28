@@ -259,10 +259,21 @@ function plotStyleKey(plot: StudyPlot, range?: StudyRange): string {
   ].join("|");
 }
 
-/** Autoscale that always reports the study's fixed span. */
+/**
+ * Autoscale that always reports the study's fixed span. The pixel margins
+ * replace the pane's usual percentage ones, which would leave room for a tick
+ * beyond the bounds (a "125" on RSI) once the pane is tall enough.
+ */
+const FIXED_RANGE_MARGIN_PX = 6;
+
 function fixedRangeOptions(range: StudyRange | undefined) {
   return range
-    ? { autoscaleInfoProvider: () => ({ priceRange: { minValue: range.min, maxValue: range.max } }) }
+    ? {
+      autoscaleInfoProvider: () => ({
+        priceRange: { minValue: range.min, maxValue: range.max },
+        margins: { above: FIXED_RANGE_MARGIN_PX, below: FIXED_RANGE_MARGIN_PX },
+      }),
+    }
     : {};
 }
 
