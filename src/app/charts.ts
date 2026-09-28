@@ -168,6 +168,8 @@ type StudyPane = {
   levelLines: IPriceLine[];
   /** The series `levelLines` were drawn on; they die with it. */
   levelAnchor: ISeriesApi<SeriesType> | null;
+  /** Whether the price scale currently uses the fixed-range margins. */
+  fixedRangeScale: boolean;
 };
 
 function usesOhlcData(chartType: ChartType): boolean {
@@ -277,10 +279,14 @@ function plotStyleKey(plot: StudyPlot, range?: StudyRange): string {
   ].join("|");
 }
 
+/** Room above and below an autoscaled study, leaving the legend clear. */
+const STUDY_SCALE_MARGINS = { top: 0.18, bottom: 0.1 };
+
 /**
- * Autoscale that always reports the study's fixed span. The pixel margins
- * replace the pane's usual percentage ones, which would leave room for a tick
- * beyond the bounds (a "125" on RSI) once the pane is tall enough.
+ * Autoscale that always reports the study's fixed span, with a few pixels of
+ * margin. lightweight-charts adds these to the scale's percentage margins, so
+ * fixed-range panes also zero those (see `syncStudyScale`); otherwise a tall
+ * pane has room for a tick past the bounds, such as 120 on RSI.
  */
 const FIXED_RANGE_MARGIN_PX = 6;
 
@@ -1020,7 +1026,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       rightPriceScale: {
         borderVisible: false,
         minimumWidth: rightScaleWidthPx,
-        scaleMargins: { top: 0.18, bottom: 0.1 },
+        scaleMargins: STUDY_SCALE_MARGINS,
       },
       ...timeAxisOptions(false),
     });
@@ -1040,6 +1046,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       series: new Map(),
       levelLines: [],
       levelAnchor: null,
+      fixedRangeScale: false,
     };
   };
 
@@ -1353,6 +1360,18 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     }
   };
 
+  /** Fixed-range studies get pixel margins only; see `FIXED_RANGE_MARGIN_PX`. */
+  const syncStudyScale = (pane: StudyPane, result: StudyResult): void => {
+    const fixed = result.range !== undefined;
+    if (fixed === pane.fixedRangeScale) {
+      return;
+    }
+    pane.fixedRangeScale = fixed;
+    pane.chart.priceScale("right").applyOptions({
+      scaleMargins: fixed ? { top: 0, bottom: 0 } : STUDY_SCALE_MARGINS,
+    });
+  };
+
   const computeStudies = (): void => {
     const next = new Map<string, StudyResult>();
     const context = { bars, timespan, multiplier };
@@ -1403,6 +1422,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
         new Set(result.plots.map((plot) => `${pane.studyKey}:${plot.key}`)),
       );
       syncStudyLevels(pane, result);
+      syncStudyScale(pane, result);
     }
   };
 
