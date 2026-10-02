@@ -4,6 +4,7 @@ export type AppElements = {
   watchlistAddFormEl: HTMLFormElement;
   watchlistAddInputEl: HTMLInputElement;
   searchResultsEl: HTMLDivElement;
+  controlsEl: HTMLDivElement;
   rangeGroupEl: HTMLDivElement;
   intervalGroupEl: HTMLDivElement;
   typeGroupEl: HTMLDivElement;
@@ -68,6 +69,7 @@ export function initElements(root: ParentNode = document): AppElements {
     watchlistAddFormEl: root.querySelector("#watchlist-add-form") as HTMLFormElement,
     watchlistAddInputEl: root.querySelector("#watchlist-add-input") as HTMLInputElement,
     searchResultsEl: root.querySelector("#search-results") as HTMLDivElement,
+    controlsEl: root.querySelector("#controls") as HTMLDivElement,
     rangeGroupEl: root.querySelector("#range-group") as HTMLDivElement,
     intervalGroupEl: root.querySelector("#interval-group") as HTMLDivElement,
     typeGroupEl: root.querySelector("#type-group") as HTMLDivElement,

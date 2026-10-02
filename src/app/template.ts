@@ -27,7 +27,7 @@ export const APP_TEMPLATE = `
           <div id="extended-strip" class="extended-strip hidden" aria-label="Extended hours pricing"></div>
         </div>
       </header>
-      <div class="controls">
+      <div class="controls" id="controls">
         <div class="range-group" id="range-group"></div>
         <div class="interval-group hidden" id="interval-group"></div>
         <div class="ma-group" id="ma-group"></div>

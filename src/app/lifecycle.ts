@@ -34,7 +34,7 @@ import { startRefreshProgressLoop, stopRefreshProgressLoop } from "./progress";
 import { loadProviderStatus } from "./provider";
 import { hideSearchResults, setupSymbolSearch } from "./search";
 import { debugLog, isApiCooldownActive, persistPrefs, state } from "./store";
-import { filterStudyMenu, initStudyMenu, renderControls, renderStats, syncStudyMenuState } from "./ui";
+import { alignDropdown, filterStudyMenu, initStudyMenu, renderControls, renderStats, syncStudyMenuState } from "./ui";
 import { initUpdater, isUpdateDialogOpen } from "./updater";
 import { getStudy } from "./studies";
 import { normalizeTicker } from "./utils";
@@ -60,6 +60,7 @@ function setStudyMenuOpen(open: boolean): void {
   els.studyToggleEl.setAttribute("aria-expanded", String(open));
 
   if (open) {
+    alignDropdown(els.studyMenuEl);
     els.studyFilterEl.focus();
     els.studyFilterEl.select();
   }

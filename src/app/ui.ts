@@ -12,6 +12,19 @@ import { STUDIES } from "./studies";
 import { escapeHtml, fmtCompact, fmtNumber, fmtPct, formatRelativeTime } from "./utils";
 import type { NewsItem } from "./types";
 
+/**
+ * Dropdowns hang right-aligned off their button, which runs them off the left
+ * of the controls when the chart tools wrap onto a row of their own. Flip those
+ * to left-aligned. Call after unhiding the menu, so it can be measured.
+ */
+export function alignDropdown(menu: HTMLElement): void {
+  menu.classList.remove("align-start");
+  const bounds = els.controlsEl.getBoundingClientRect();
+  if (menu.getBoundingClientRect().left < bounds.left) {
+    menu.classList.add("align-start");
+  }
+}
+
 export function updateHeadline(): void {
   const {
     selectedTicker,

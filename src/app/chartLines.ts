@@ -9,6 +9,7 @@ import {
 import { els } from "./elements";
 import { IS_MOBILE } from "./platform";
 import { persistPrefs, state } from "./store";
+import { alignDropdown } from "./ui";
 import { escapeHtml } from "./utils";
 import type { ChartLine, ChartLineAnchor, ChartLineKind } from "./types";
 
@@ -70,6 +71,9 @@ export function syncLineToolbar(lines: ChartLine[] = chartLinesFor(chartedTicker
 function setDropdownOpen(open: boolean): void {
   els.lineDropdownEl.classList.toggle("hidden", !open);
   els.lineToggleEl.setAttribute("aria-expanded", String(open));
+  if (open) {
+    alignDropdown(els.lineDropdownEl);
+  }
 }
 
 function startPlacing(kind: ChartLineKind): void {

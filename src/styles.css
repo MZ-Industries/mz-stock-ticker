@@ -646,6 +646,12 @@ p {
   width: 200px;
 }
 
+.line-dropdown.align-start,
+.study-menu.align-start {
+  right: auto;
+  left: 0;
+}
+
 .line-context-menu {
   position: fixed;
   z-index: 60;
