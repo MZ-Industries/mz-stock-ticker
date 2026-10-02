@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.2...v0.8.3) (2026-10-02)
+
+
+### Bug Fixes
+
+* keep Lines and Studies menus on screen when the toolbar wraps ([5155291](https://github.com/MZ-Industries/mz-stock-ticker/commit/515529177fe50f11cc524731f72996d993030410))
+
 ## [0.8.2](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.1...v0.8.2) (2026-09-28)
 
 
