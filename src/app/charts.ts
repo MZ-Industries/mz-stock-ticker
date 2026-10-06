@@ -1,4 +1,5 @@
 import {
+  BaselineSeries,
   CandlestickSeries,
   CrosshairMode,
   HistogramSeries,
@@ -276,6 +277,7 @@ function plotStyleKey(plot: StudyPlot, range?: StudyRange): string {
     plot.dashed ? "dashed" : "solid",
     plot.underlay ? "underlay" : "scaled",
     range ? `${range.min}:${range.max}` : "auto",
+    plot.type === "fill" ? `${plot.fillSide}:${plot.fillBase}` : "",
   ].join("|");
 }
 
@@ -337,6 +339,21 @@ function createPlotSeries(
     lastValueVisible: false,
     crosshairMarkerVisible: false,
   };
+
+  if (plot.type === "fill") {
+    const shade = (side: "above" | "below") => (plot.fillSide === side ? plot.color : "transparent");
+    return chart.addSeries(BaselineSeries, {
+      ...base,
+      baseValue: { type: "price", price: plot.fillBase ?? 0 },
+      lineVisible: false,
+      topLineColor: "transparent",
+      bottomLineColor: "transparent",
+      topFillColor1: shade("above"),
+      topFillColor2: shade("above"),
+      bottomFillColor1: shade("below"),
+      bottomFillColor2: shade("below"),
+    });
+  }
 
   if (plot.type === "dots") {
     return chart.addSeries(LineSeries, {
@@ -498,6 +515,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       }
 
       const values = result.plots
+        .filter((plot) => plot.type !== "fill")
         .map((plot) => {
           const value = plot.values[index];
           if (value === null || value === undefined || !Number.isFinite(value)) {
@@ -524,6 +542,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     }
 
     const values = result.plots
+      .filter((plot) => plot.type !== "fill")
       .map((plot) => {
         const value = plot.values[index];
         if (value === null || value === undefined || !Number.isFinite(value)) {

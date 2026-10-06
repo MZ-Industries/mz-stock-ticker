@@ -14,8 +14,12 @@ import type { AggregateBar } from "./types";
 
 export type StudyPlacement = "price" | "pane";
 
-/** `dots` is a line series with the line hidden - used for Parabolic SAR. */
-export type StudyPlotType = "line" | "histogram" | "dots";
+/**
+ * `dots` is a line series with the line hidden - used for Parabolic SAR.
+ * `fill` shades between the values and `fillBase` on `fillSide`, with no line
+ * and no legend entry - used for overbought/oversold zones.
+ */
+export type StudyPlotType = "line" | "histogram" | "dots" | "fill";
 
 export type StudyPlot = {
   key: string;
@@ -29,6 +33,9 @@ export type StudyPlot = {
   colors?: Array<string | null>;
   /** Draw on a hidden scale pinned to the bottom of the price pane. */
   underlay?: boolean;
+  /** For `fill` plots: the level shaded against, and which side of it. */
+  fillBase?: number;
+  fillSide?: "above" | "below";
 };
 
 export type StudyLevel = {
@@ -79,6 +86,8 @@ const ROSE = "#fb7185";
 const SLATE = "#94a3b8";
 const UP = "#34d399";
 const DOWN = "#f87171";
+const UP_FILL = "rgba(52, 211, 153, 0.3)";
+const DOWN_FILL = "rgba(248, 113, 113, 0.3)";
 
 function line(
   key: string,
@@ -88,6 +97,11 @@ function line(
   options: { lineWidth?: 1 | 2; dashed?: boolean } = {},
 ): StudyPlot {
   return { key, label, type: "line", color, values, ...options };
+}
+
+/** Shades the gap between `values` and `base` wherever they cross to `side` of it. */
+function fill(key: string, values: Series, base: number, side: "above" | "below", color: string): StudyPlot {
+  return { key, label: "", type: "fill", color, values, fillBase: base, fillSide: side };
 }
 
 /** Colours a histogram by the sign of each value. */
@@ -566,15 +580,23 @@ export const STUDIES: StudyDefinition[] = [
     key: "rsi",
     label: "RSI",
     placement: "pane",
-    compute: ({ bars }) => ({
-      plots: [line("rsi", "RSI 14", ind.rsi(bars, 14), VIOLET, { lineWidth: 2 })],
-      levels: [
-        { value: 70, color: DOWN, dashed: true },
-        { value: 50, color: SLATE, dashed: true },
-        { value: 30, color: UP, dashed: true },
-      ],
-      range: PERCENT_RANGE,
-    }),
+    compute: ({ bars }) => {
+      const values = ind.rsi(bars, 14);
+      return {
+        // Fills first so the RSI line draws over them.
+        plots: [
+          fill("overbought", values, 80, "above", DOWN_FILL),
+          fill("oversold", values, 20, "below", UP_FILL),
+          line("rsi", "RSI 14", values, VIOLET, { lineWidth: 2 }),
+        ],
+        levels: [
+          { value: 80, color: DOWN, dashed: true },
+          { value: 50, color: SLATE, dashed: true },
+          { value: 20, color: UP, dashed: true },
+        ],
+        range: PERCENT_RANGE,
+      };
+    },
   },
   {
     key: "standard-deviation",
