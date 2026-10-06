@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.3...v0.8.4) (2026-10-06)
+
+
+### Bug Fixes
+
+* move RSI bands to 80/20 and shade the overbought/oversold zones ([02ecdbf](https://github.com/MZ-Industries/mz-stock-ticker/commit/02ecdbfa0b8463ea902bedb6517ce852b5e10ada))
+
 ## [0.8.3](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.2...v0.8.3) (2026-10-02)
 
 
