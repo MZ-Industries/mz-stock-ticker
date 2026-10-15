@@ -46,7 +46,8 @@ export function normalizeTicker(raw: string): string | null {
     return null;
   }
 
-  const valid = ticker.length <= 12 && /^[A-Z0-9.-]+$/.test(ticker);
+  // `^` prefixes indices (^FTSE) and `=` marks futures/FX (GC=F, GBPUSD=X).
+  const valid = ticker.length <= 12 && /^\^?[A-Z0-9.=-]+$/.test(ticker);
   return valid ? ticker : null;
 }
 

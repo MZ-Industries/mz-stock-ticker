@@ -223,6 +223,10 @@ pub(crate) async fn fetch_massive_volume_overlay(
     let Some(api_key) = backfill_api_key() else {
         return Ok(HashMap::new());
     };
+    // Massive only carries US equities; indices and futures/FX have no overlay.
+    if ticker.contains(['^', '=']) {
+        return Ok(HashMap::new());
+    }
 
     let overlay_to = add_days_ymd(to, 1).unwrap_or_else(|| to.to_string());
     debug_log(&format!(
@@ -296,7 +300,7 @@ pub(crate) async fn fetch_massive_volume_overlay(
 /// symbol-detail fallbacks that read its `meta` when the quote endpoint is
 /// unavailable.
 async fn fetch_chart_payload(client: &Client, ticker: &str) -> Option<YahooChartResult> {
-    let mut url = Url::parse(&format!("{}/v8/finance/chart/{}", yahoo_base_url(), ticker)).ok()?;
+    let mut url = Url::parse(&format!("{}/v8/finance/chart/{}", yahoo_base_url(), chart_path_symbol(ticker))).ok()?;
     url.query_pairs_mut()
         .append_pair("range", "1d")
         .append_pair("interval", "1m")
@@ -405,13 +409,21 @@ pub(crate) fn put_cached_detail(item: SymbolDetail) {
     }
 }
 
+/// The url crate leaves `^` and `=` raw in a path; encode them as Yahoo's own
+/// pages do so index and futures symbols reach the chart endpoint intact.
+fn chart_path_symbol(ticker: &str) -> String {
+    ticker.replace('^', "%5E").replace('=', "%3D")
+}
+
 pub(crate) fn sanitize_ticker(ticker: &str) -> Result<String, String> {
     let trimmed = ticker.trim().to_uppercase();
-    let valid = !trimmed.is_empty()
+    // `^` prefixes indices (^FTSE) and `=` marks futures/FX (GC=F, GBPUSD=X).
+    let body = trimmed.strip_prefix('^').unwrap_or(&trimmed);
+    let valid = !body.is_empty()
         && trimmed.len() <= 12
-        && trimmed
-            .chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '.' || c == '-');
+        && body.chars().all(|c| {
+            c.is_ascii_uppercase() || c.is_ascii_digit() || c == '.' || c == '-' || c == '='
+        });
 
     if valid {
         Ok(trimmed)
@@ -629,7 +641,7 @@ async fn fetch_chart_bars_query(
     interval: &str,
     window_params: &[(&str, String)],
 ) -> Result<Vec<AggregateBar>, String> {
-    let mut url = Url::parse(&format!("{}/v8/finance/chart/{}", yahoo_base_url(), ticker))
+    let mut url = Url::parse(&format!("{}/v8/finance/chart/{}", yahoo_base_url(), chart_path_symbol(ticker)))
         .map_err(|err| format!("Bad Yahoo chart URL: {}", err))?;
     for (key, value) in window_params {
         url.query_pairs_mut().append_pair(key, value);
@@ -898,6 +910,17 @@ pub(crate) fn same_bars(left: &[AggregateBar], right: &[AggregateBar]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_ticker_accepts_indices_and_futures() {
+        assert_eq!(sanitize_ticker(" ^ftse ").unwrap(), "^FTSE");
+        assert_eq!(sanitize_ticker("gc=f").unwrap(), "GC=F");
+        assert_eq!(sanitize_ticker("BRK-B").unwrap(), "BRK-B");
+        assert!(sanitize_ticker("^").is_err());
+        assert!(sanitize_ticker("FT^SE").is_err());
+        assert!(sanitize_ticker("A/B").is_err());
+        assert_eq!(chart_path_symbol("^FTSE"), "%5EFTSE");
+    }
 
     fn bar(t: i64, o: f64, h: f64, l: f64, c: f64, v: f64) -> AggregateBar {
         AggregateBar { t, o, h, l, c, v }

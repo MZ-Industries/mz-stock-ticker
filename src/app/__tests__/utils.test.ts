@@ -46,12 +46,15 @@ describe("normalizeTicker", () => {
   it("uppercases and trims valid symbols", () => {
     expect(normalizeTicker(" brk-b ")).toBe("BRK-B");
     expect(normalizeTicker("aapl")).toBe("AAPL");
+    expect(normalizeTicker("^ftse")).toBe("^FTSE");
+    expect(normalizeTicker("gbpusd=x")).toBe("GBPUSD=X");
   });
 
   it("rejects invalid symbols", () => {
     expect(normalizeTicker("")).toBeNull();
     expect(normalizeTicker("TOO_LONG_SYMBOL")).toBeNull();
     expect(normalizeTicker("<script>")).toBeNull();
+    expect(normalizeTicker("FT^SE")).toBeNull();
   });
 });
 
