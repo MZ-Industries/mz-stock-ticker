@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.7](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.6...v0.8.7) (2026-10-15)
+
+
+### Bug Fixes
+
+* repair candles carrying several copies of the running volume total ([d3ab7c1](https://github.com/MZ-Industries/mz-stock-ticker/commit/d3ab7c14645e45b544f4720e5abc387b0a6f554e))
+
 ## [0.8.6](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.5...v0.8.6) (2026-10-15)
 
 
