@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.8](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.7...v0.8.8) (2026-10-15)
+
+
+### Bug Fixes
+
+* allow index and futures symbols like ^FTSE and GC=F ([14b675d](https://github.com/MZ-Industries/mz-stock-ticker/commit/14b675de9b2d26100dd4be87cbd474c6f33d97f7))
+
 ## [0.8.7](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.6...v0.8.7) (2026-10-15)
 
 
