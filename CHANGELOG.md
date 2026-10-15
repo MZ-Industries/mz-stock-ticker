@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.6](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.5...v0.8.6) (2026-10-15)
+
+
+### Bug Fixes
+
+* repair candles that carry the session's running volume total ([4758afb](https://github.com/MZ-Industries/mz-stock-ticker/commit/4758afbc70eb0cdabc0ec588b409c293a51c7b20))
+
 ## [0.8.5](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.4...v0.8.5) (2026-10-15)
 
 
