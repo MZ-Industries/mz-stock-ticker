@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.5](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.4...v0.8.5) (2026-10-15)
+
+
+### Bug Fixes
+
+* stop the session volume total landing on a candle when a quote prints on a bucket boundary ([40633d0](https://github.com/MZ-Industries/mz-stock-ticker/commit/40633d037caede3f3db3718acb0d5c0b73affb71))
+
 ## [0.8.4](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.3...v0.8.4) (2026-10-06)
 
 
