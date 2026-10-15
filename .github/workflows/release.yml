@@ -151,6 +151,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # Both macOS legs run on the same runner image, so without this they
+          # share one cache entry and whichever saves first wins - leaving the
+          # other target to rebuild every dependency from scratch.
+          key: ${{ matrix.rust-targets }}
 
       - name: Build and upload to draft release
         uses: tauri-apps/tauri-action@v0
