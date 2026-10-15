@@ -666,7 +666,7 @@ async fn fetch_chart_bars_query(
         .and_then(|meta| meta.regular_market_time)
         .map(|seconds| seconds * 1000);
 
-    let bars = result
+    let mut bars = result
         .and_then(|result| {
             let timestamps = result.timestamp?;
             let quote = result.indicators?.quote?.into_iter().next()?;
@@ -714,8 +714,8 @@ async fn fetch_chart_bars_query(
         })
         .unwrap_or_default();
 
-    if let Some(bucket_ms) = yahoo_minute_interval_ms(interval) {
-        log_volume_outliers(&bars, bucket_ms);
+    if yahoo_minute_interval_ms(interval).is_some() {
+        repair_running_total_volumes(&mut bars);
     }
 
     // Hourly and daily candles are stamped at the session open (09:30 ET); flooring
@@ -726,45 +726,61 @@ async fn fetch_chart_bars_query(
     })
 }
 
-/// Reports candles whose volume is wildly out of line with the rest of the series.
+/// Repairs candles whose volume is the session's running total rather than the
+/// volume traded in that bucket.
 ///
-/// Yahoo has been observed publishing the *session running total* in the volume
-/// field instead of the bucket's own volume, which paints a bar tens of times
-/// taller than any real one. The trailing off-grid quote row is a known source and
-/// is handled in `align_bars_to_grid`; this exists to show whether grid-aligned
-/// rows carry it too, which would need a different remedy.
-fn log_volume_outliers(bars: &[AggregateBar], bucket_ms: i64) {
-    if !debug_enabled() {
-        return;
-    }
-
+/// Yahoo has been seen storing that running total on an ordinary, grid-aligned
+/// candle deep in the series (TQQQ 2026-10-15 15:30 carried 68.4M against a
+/// ~0.5M median), and the bad value stays in its history on every later fetch.
+/// Such a candle is spotted by its volume roughly matching the sum of the regular
+/// session candles before it that day; the bucket's own volume is what is left
+/// after taking that sum away.
+///
+/// Only regular-session candles take part: the session total Yahoo leaks is the
+/// regular-session one, and the opening candle legitimately dwarfs the median
+/// with nothing before it to be confused with.
+pub(crate) fn repair_running_total_volumes(bars: &mut [AggregateBar]) {
     let mut volumes: Vec<f64> = bars.iter().map(|bar| bar.v).filter(|v| *v > 0.0).collect();
     if volumes.len() < 20 {
         return;
     }
-
     volumes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let median = volumes[volumes.len() / 2];
     if median <= 0.0 {
         return;
     }
+    let outlier = median * 20.0;
 
-    let threshold = median * 20.0;
+    let mut session_day: Option<chrono::NaiveDate> = None;
     let mut running = 0.0_f64;
 
-    for bar in bars {
-        if bar.v > threshold {
-            let on_grid = bar.t == bar.t.div_euclid(bucket_ms) * bucket_ms;
-            debug_log(&format!(
-                "aggs:volume-outlier t={} on_grid={} v={} median={} running_total_before={} ratio_to_running={:.3}",
-                bar.t,
-                on_grid,
-                bar.v,
-                median,
-                running,
-                if running > 0.0 { bar.v / running } else { f64::NAN }
-            ));
+    for bar in bars.iter_mut() {
+        if !is_regular_market_bar(bar.t) {
+            continue;
         }
+        let day = New_York
+            .timestamp_millis_opt(bar.t)
+            .single()
+            .map(|dt| dt.date_naive());
+        if day != session_day {
+            session_day = day;
+            running = 0.0;
+        }
+
+        let looks_like_running_total = bar.v > outlier
+            && running > outlier
+            && bar.v >= running * 0.95
+            && bar.v <= running * 1.25;
+
+        if looks_like_running_total {
+            let repaired = (bar.v - running).max(0.0);
+            debug_log(&format!(
+                "aggs:volume-running-total t={} v={} running_before={} repaired={} median={}",
+                bar.t, bar.v, running, repaired, median
+            ));
+            bar.v = repaired;
+        }
+
         running += bar.v;
     }
 }
@@ -954,6 +970,46 @@ mod tests {
         assert_eq!(aligned[0].v, 10.0, "earlier candles are untouched");
         assert_eq!(aligned[1].c, 2.0, "price is still live");
         assert_eq!(aligned[1].v, 0.0, "the session running total is not bar volume");
+    }
+
+    /// A 5m TQQQ-like session for 2026-10-15: pre-market, a heavy opening candle,
+    /// then a steady ~0.5M a bucket.
+    fn session_bars() -> Vec<AggregateBar> {
+        const OPEN_MS: i64 = 1_792_071_000_000; // 09:30 ET
+        let mut bars: Vec<AggregateBar> = (1..=6)
+            .rev()
+            .map(|n| bar(OPEN_MS - n * 300_000, 1.0, 1.0, 1.0, 1.0, 200_000.0))
+            .collect();
+        bars.push(bar(OPEN_MS, 1.0, 1.0, 1.0, 1.0, 13_000_000.0));
+        for n in 1..72 {
+            bars.push(bar(OPEN_MS + n * 300_000, 1.0, 1.0, 1.0, 1.0, 500_000.0));
+        }
+        bars
+    }
+
+    #[test]
+    fn running_total_volume_on_a_mid_session_candle_is_repaired() {
+        let mut bars = session_bars();
+        // 15:30 is regular-session candle 72; everything before it sums to 13M + 71 * 0.5M.
+        let before: f64 = 13_000_000.0 + 71.0 * 500_000.0;
+        bars.push(bar(1_792_092_600_000, 1.0, 1.0, 1.0, 1.0, before + 1_070_000.0));
+        bars.push(bar(1_792_092_900_000, 1.0, 1.0, 1.0, 1.0, 463_000.0));
+
+        repair_running_total_volumes(&mut bars);
+
+        let spike = bars.iter().find(|b| b.t == 1_792_092_600_000).unwrap();
+        assert!((spike.v - 1_070_000.0).abs() < 1.0, "left with its own volume, got {}", spike.v);
+        assert_eq!(bars.last().unwrap().v, 463_000.0, "the candle after is untouched");
+    }
+
+    #[test]
+    fn heavy_opening_candle_is_not_mistaken_for_a_running_total() {
+        let mut bars = session_bars();
+        let original = bars.clone();
+
+        repair_running_total_volumes(&mut bars);
+
+        assert_eq!(bars, original);
     }
 
     #[test]
