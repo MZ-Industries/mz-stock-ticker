@@ -59,6 +59,7 @@ struct YahooChartMeta {
     regular_market_day_high: Option<f64>,
     regular_market_day_low: Option<f64>,
     regular_market_volume: Option<f64>,
+    regular_market_time: Option<i64>,
     fifty_two_week_high: Option<f64>,
     fifty_two_week_low: Option<f64>,
     long_name: Option<String>,

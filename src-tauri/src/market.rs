@@ -523,12 +523,23 @@ pub(crate) fn yahoo_minute_interval_ms(interval: &str) -> Option<i64> {
 /// contributes price only - the bucket keeps whatever volume a real candle gave it,
 /// and a bucket that has no real candle yet reports no volume until Yahoo
 /// publishes one.
-pub(crate) fn align_bars_to_grid(bars: Vec<AggregateBar>, bucket_ms: i64) -> Vec<AggregateBar> {
+///
+/// Being off the grid is not enough on its own to spot the snapshot: a quote that
+/// prints exactly on a bucket boundary lands on the grid and would pass for a
+/// candle. `quote_time_ms` is the chart meta's `regularMarketTime`, and a trailing
+/// entry stamped with it is treated as the snapshot wherever it falls.
+pub(crate) fn align_bars_to_grid(
+    bars: Vec<AggregateBar>,
+    bucket_ms: i64,
+    quote_time_ms: Option<i64>,
+) -> Vec<AggregateBar> {
     let mut out: Vec<AggregateBar> = Vec::with_capacity(bars.len());
+    let last_index = bars.len().saturating_sub(1);
 
-    for mut bar in bars {
+    for (index, mut bar) in bars.into_iter().enumerate() {
         let bucket_start = bar.t.div_euclid(bucket_ms) * bucket_ms;
-        let is_quote_snapshot = bar.t != bucket_start;
+        let is_quote_snapshot =
+            bar.t != bucket_start || (index == last_index && Some(bar.t) == quote_time_ms);
         bar.t = bucket_start;
 
         if is_quote_snapshot {
@@ -648,12 +659,14 @@ async fn fetch_chart_bars_query(
         .await
         .map_err(|err| format!("Failed to parse Yahoo chart response: {}", err))?;
 
-    let bars = payload
-        .chart
-        .result
-        .unwrap_or_default()
-        .into_iter()
-        .next()
+    let result = payload.chart.result.unwrap_or_default().into_iter().next();
+    let quote_time_ms = result
+        .as_ref()
+        .and_then(|result| result.meta.as_ref())
+        .and_then(|meta| meta.regular_market_time)
+        .map(|seconds| seconds * 1000);
+
+    let bars = result
         .and_then(|result| {
             let timestamps = result.timestamp?;
             let quote = result.indicators?.quote?.into_iter().next()?;
@@ -708,7 +721,7 @@ async fn fetch_chart_bars_query(
     // Hourly and daily candles are stamped at the session open (09:30 ET); flooring
     // those to a UTC grid would relabel them half an hour early.
     Ok(match yahoo_minute_interval_ms(interval) {
-        Some(interval_ms) => align_bars_to_grid(bars, interval_ms),
+        Some(interval_ms) => align_bars_to_grid(bars, interval_ms, quote_time_ms),
         None => bars,
     })
 }
@@ -880,7 +893,7 @@ mod tests {
             bar(1_787_588_160_000, 1.5, 2.5, 1.0, 2.0, 20.0),
         ];
 
-        let aligned = align_bars_to_grid(bars, 60_000);
+        let aligned = align_bars_to_grid(bars, 60_000, None);
 
         assert_eq!(aligned.len(), 2);
         assert_eq!(aligned[0].t, 1_787_588_100_000);
@@ -898,7 +911,7 @@ mod tests {
             bar(1_787_588_212_000, 2.0, 2.9, 1.2, 2.4, 31_000_000.0),
         ];
 
-        let aligned = align_bars_to_grid(bars, 60_000);
+        let aligned = align_bars_to_grid(bars, 60_000, None);
 
         assert_eq!(aligned.len(), 2);
         let last = &aligned[1];
@@ -918,12 +931,29 @@ mod tests {
             bar(1_787_588_171_000, 2.0, 2.0, 2.0, 2.0, 31_000_000.0),
         ];
 
-        let aligned = align_bars_to_grid(bars, 60_000);
+        let aligned = align_bars_to_grid(bars, 60_000, None);
 
         assert_eq!(aligned.len(), 2);
         assert_eq!(aligned[1].t, 1_787_588_160_000);
         assert_eq!(aligned[1].c, 2.0, "price is still live");
         assert_eq!(aligned[1].v, 0.0, "volume waits for a real candle");
+    }
+
+    #[test]
+    fn quote_snapshot_printed_on_a_bucket_boundary_reports_no_volume() {
+        // A quote stamped exactly 15:30:00 sits on the 5m grid, so only the meta's
+        // regularMarketTime gives it away as the snapshot rather than a candle.
+        let bars = vec![
+            bar(1_787_588_100_000, 1.0, 2.0, 0.5, 1.5, 10.0),
+            bar(1_787_588_400_000, 2.0, 2.0, 2.0, 2.0, 68_000_000.0),
+        ];
+
+        let aligned = align_bars_to_grid(bars, 300_000, Some(1_787_588_400_000));
+
+        assert_eq!(aligned.len(), 2);
+        assert_eq!(aligned[0].v, 10.0, "earlier candles are untouched");
+        assert_eq!(aligned[1].c, 2.0, "price is still live");
+        assert_eq!(aligned[1].v, 0.0, "the session running total is not bar volume");
     }
 
     #[test]
@@ -994,7 +1024,7 @@ mod tests {
             bar(1_787_588_400_000, 2.0, 3.0, 1.8, 2.8, 30.0),
         ];
 
-        let aligned = align_bars_to_grid(bars, 300_000);
+        let aligned = align_bars_to_grid(bars, 300_000, None);
 
         assert_eq!(aligned.len(), 2);
         assert_eq!(aligned[0].t, 1_787_588_100_000);
