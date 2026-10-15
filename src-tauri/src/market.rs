@@ -732,9 +732,14 @@ async fn fetch_chart_bars_query(
 /// Yahoo has been seen storing that running total on an ordinary, grid-aligned
 /// candle deep in the series (TQQQ 2026-10-15 15:30 carried 68.4M against a
 /// ~0.5M median), and the bad value stays in its history on every later fetch.
-/// Such a candle is spotted by its volume roughly matching the sum of the regular
-/// session candles before it that day; the bucket's own volume is what is left
-/// after taking that sum away.
+///
+/// The leak happens on Yahoo's 1-minute rows, which it then sums into wider
+/// candles, so a 5m candle can carry the running total once, twice or three times
+/// over (QQQ the same day had a dozen such candles between 10:20 and 12:05, the
+/// worst at 3 x 26.6M + 0.4M). A candle is treated as leaked when its volume sits
+/// just above a whole multiple of the sum of the regular-session candles before
+/// it that day; the bucket's own volume is what is left after taking those copies
+/// away.
 ///
 /// Only regular-session candles take part: the session total Yahoo leaks is the
 /// regular-session one, and the opening candle legitimately dwarfs the median
@@ -767,18 +772,23 @@ pub(crate) fn repair_running_total_volumes(bars: &mut [AggregateBar]) {
             running = 0.0;
         }
 
-        let looks_like_running_total = bar.v > outlier
-            && running > outlier
-            && bar.v >= running * 0.95
-            && bar.v <= running * 1.25;
+        if bar.v > outlier && running > outlier {
+            // The leaked copies are a total from somewhere inside the bucket, so they
+            // run slightly ahead of `running`; allow a little slack either side.
+            let copies = (bar.v / running).round();
+            let remainder = bar.v - copies * running;
+            let looks_like_running_total = copies >= 1.0
+                && remainder >= -0.05 * copies * running
+                && remainder <= 0.25 * running;
 
-        if looks_like_running_total {
-            let repaired = (bar.v - running).max(0.0);
-            debug_log(&format!(
-                "aggs:volume-running-total t={} v={} running_before={} repaired={} median={}",
-                bar.t, bar.v, running, repaired, median
-            ));
-            bar.v = repaired;
+            if looks_like_running_total {
+                let repaired = remainder.max(0.0);
+                debug_log(&format!(
+                    "aggs:volume-running-total t={} v={} copies={} running_before={} repaired={} median={}",
+                    bar.t, bar.v, copies, running, repaired, median
+                ));
+                bar.v = repaired;
+            }
         }
 
         running += bar.v;
@@ -1000,6 +1010,21 @@ mod tests {
         let spike = bars.iter().find(|b| b.t == 1_792_092_600_000).unwrap();
         assert!((spike.v - 1_070_000.0).abs() < 1.0, "left with its own volume, got {}", spike.v);
         assert_eq!(bars.last().unwrap().v, 463_000.0, "the candle after is untouched");
+    }
+
+    #[test]
+    fn candle_carrying_several_copies_of_the_running_total_is_repaired() {
+        // QQQ's 11:55 candle summed three leaked 1-minute rows: 3 x running + its own.
+        let mut bars = session_bars();
+        let before: f64 = 13_000_000.0 + 71.0 * 500_000.0;
+        bars.push(bar(1_792_092_600_000, 1.0, 1.0, 1.0, 1.0, 3.0 * before + 437_000.0));
+        bars.push(bar(1_792_092_900_000, 1.0, 1.0, 1.0, 1.0, 2.0 * (before + 437_000.0) + 300_000.0));
+
+        repair_running_total_volumes(&mut bars);
+
+        let n = bars.len();
+        assert!((bars[n - 2].v - 437_000.0).abs() < 1.0, "got {}", bars[n - 2].v);
+        assert!((bars[n - 1].v - 300_000.0).abs() < 1.0, "the next leak builds on the repaired total, got {}", bars[n - 1].v);
     }
 
     #[test]
