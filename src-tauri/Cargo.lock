@@ -2173,7 +2173,7 @@ dependencies = [
 
 [[package]]
 name = "mz-stock-ticker"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "chrono",
  "chrono-tz",
