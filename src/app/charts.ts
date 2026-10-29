@@ -430,6 +430,8 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   let previousClose: number | null = null;
   let previousCloseLine: IPriceLine | null = null;
   let legendEl: HTMLDivElement | null = null;
+  /** Crosshair time readout for panes whose own time axis is hidden. */
+  let crosshairTimeEl: HTMLDivElement | null = null;
   let overlayLegendEl: HTMLDivElement | null = null;
   let defaultVisibleRange: VisibleRange | null = null;
   let lastViewResetAtMs = 0;
@@ -582,6 +584,39 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     const timestampMs = param.time * 1000;
     const index = bars.findIndex((bar) => bar.t === timestampMs);
     renderAllLegends(index >= 0 ? index : bars.length - 1);
+  };
+
+  /**
+   * Only the bottom pane shows a time axis, so lightweight-charts has nowhere
+   * to draw the crosshair's time on any other pane. This stands in for it, on
+   * the bottom edge of the hovered pane's plot area.
+   */
+  const renderCrosshairTime = (chart: IChartApi, param: MouseEventParams): void => {
+    const charts = allCharts();
+    const container = allPanes().find((pane) => pane.chart === chart)?.container;
+    if (!param.point || param.time === undefined || !container || chart === charts[charts.length - 1]) {
+      crosshairTimeEl?.classList.add("hidden");
+      return;
+    }
+
+    if (!crosshairTimeEl) {
+      crosshairTimeEl = document.createElement("div");
+      crosshairTimeEl.className = "chart-crosshair-time";
+    }
+    if (crosshairTimeEl.parentElement !== container) {
+      container.appendChild(crosshairTimeEl);
+    }
+
+    const label = crosshairTimeEl;
+    label.textContent = formatTooltipTime(param.time, timespan);
+    label.style.background = chart.options().crosshair.vertLine.labelBackgroundColor;
+    label.classList.remove("hidden");
+
+    // Centred on the crosshair, but kept inside the plot area like the axis labels.
+    const width = plotWidth(chart, container);
+    const left = clamp(0, Math.max(0, width - label.offsetWidth), param.point.x - label.offsetWidth / 2);
+    label.style.left = `${left.toFixed(1)}px`;
+    label.style.top = `${container.clientHeight - chart.timeScale().height() - label.offsetHeight}px`;
   };
 
   const syncPreviousCloseLine = (): void => {
@@ -1047,6 +1082,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   /** Wires a chart into the shared crosshair and range-sync subscriptions. */
   const connectChart = (chart: IChartApi): void => {
     chart.subscribeCrosshairMove(renderLegendForCrosshair);
+    chart.subscribeCrosshairMove((param) => renderCrosshairTime(chart, param));
     chart.subscribeClick((param) => handlePlacementClick(chart, param));
     chart.timeScale().subscribeVisibleLogicalRangeChange(() => mirrorRange(chart));
   };
@@ -1913,6 +1949,8 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
 
     legendEl?.remove();
     legendEl = null;
+    crosshairTimeEl?.remove();
+    crosshairTimeEl = null;
     overlayLegendEl?.remove();
     overlayLegendEl = null;
 

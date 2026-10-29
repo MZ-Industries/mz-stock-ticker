@@ -556,6 +556,17 @@ p {
   color: var(--down);
 }
 
+.chart-crosshair-time {
+  position: absolute;
+  z-index: 4;
+  padding: 3px 7px;
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /* Chart type: a two-position switch with a sliding thumb. */
 .chart-type-switch {
   position: relative;
