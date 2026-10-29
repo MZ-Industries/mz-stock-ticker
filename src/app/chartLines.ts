@@ -59,7 +59,7 @@ function writeLines(ticker: string, lines: ChartLine[]): void {
 export function syncLineToolbar(lines: ChartLine[] = chartLinesFor(chartedTicker())): void {
   const toggle = els.lineToggleEl;
   toggle.textContent = placingKind
-    ? IS_MOBILE ? "Tap chart to place" : "Click chart to place"
+    ? IS_MOBILE ? "Drag on chart to place" : "Click chart to place"
     : lines.length > 0 ? `Lines (${lines.length})` : "Lines";
   toggle.classList.toggle("active", lines.length > 0 || placingKind !== null);
   toggle.classList.toggle("placing", placingKind !== null);

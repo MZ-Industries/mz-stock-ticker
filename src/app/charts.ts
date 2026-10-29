@@ -77,6 +77,8 @@ const VOLUME_PANE_KEY = "volume";
 
 /** How close a right-click has to land to a drawn line to pick it. */
 const LINE_HIT_TOLERANCE_PX = 5;
+/** The line a touch drag would drop, drawn until the finger lifts. */
+const PLACEMENT_PREVIEW_COLOR = "rgba(226, 232, 240, 0.9)";
 
 export type ChartControllerDeps = {
   stackContainer: HTMLDivElement;
@@ -437,6 +439,14 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   let horizontalLineHandles: IPriceLine[] = [];
   let placingKind: ChartLineKind | null = null;
   let crosshairModeBeforePlacing: CrosshairMode | null = null;
+  /**
+   * Where a touch drag would drop the line being placed. A fingertip hides the
+   * spot it lands on, so touch placement previews the line and its value under
+   * the finger and only commits when it lifts.
+   */
+  let placementPreview: ChartLineAnchor | null = null;
+  let placementPreviewHandle: IPriceLine | null = null;
+  let placementPointerId: number | null = null;
 
   const allCharts = (): IChartApi[] => {
     const charts: IChartApi[] = [];
@@ -672,6 +682,19 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       }
     }
 
+    if (placementPreview?.kind === "vertical") {
+      const x = verticalLineX(chart, container, placementPreview.timeMs);
+      if (x !== null) {
+        strips.push(`<div class="chart-vline preview" style="left:${x.toFixed(1)}px"></div>`);
+        if (chart === priceChart) {
+          // Flips to the line's left in the right half so it never runs off the plot.
+          const side = x > plotWidth(chart, container) / 2 ? "left" : "right";
+          const time = formatTooltipTime(Math.floor(placementPreview.timeMs / 1000) as UTCTimestamp, timespan);
+          strips.push(`<div class="chart-vline-label ${side}" style="left:${x.toFixed(1)}px">${time}</div>`);
+        }
+      }
+    }
+
     let overlay = container.querySelector(".chart-line-overlay") as HTMLDivElement | null;
     if (strips.length === 0) {
       overlay?.remove();
@@ -715,6 +738,33 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
         }),
       );
     }
+
+    // The preview's handle went with the old series, if there was one.
+    placementPreviewHandle = null;
+    syncPlacementPreview();
+  };
+
+  const syncPlacementPreview = (): void => {
+    const price = placementPreview?.kind === "horizontal" ? placementPreview.price : null;
+    if (price === null || !priceSeries) {
+      if (placementPreviewHandle) {
+        priceSeries?.removePriceLine(placementPreviewHandle);
+        placementPreviewHandle = null;
+      }
+    } else if (placementPreviewHandle) {
+      placementPreviewHandle.applyOptions({ price });
+    } else {
+      placementPreviewHandle = priceSeries.createPriceLine({
+        price,
+        color: PLACEMENT_PREVIEW_COLOR,
+        lineWidth: 2,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        axisLabelTextColor: CHART_BACKGROUND,
+        title: "",
+      });
+    }
+    scheduleOverlays();
   };
 
   const setLines = (next: ChartLine[]): void => {
@@ -723,8 +773,30 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     scheduleOverlays();
   };
 
+  /** While placing, a touch drag moves the preview instead of panning or zooming. */
+  const setTouchNavigation = (enabled: boolean): void => {
+    for (const chart of allCharts()) {
+      chart.applyOptions({
+        handleScroll: { horzTouchDrag: enabled, vertTouchDrag: enabled },
+        handleScale: { pinch: enabled, axisPressedMouseMove: enabled },
+      });
+    }
+  };
+
+  const clearPlacementPreview = (): void => {
+    placementPointerId = null;
+    if (placementPreview) {
+      placementPreview = null;
+      syncPlacementPreview();
+    }
+  };
+
   const endLinePlacement = (): void => {
+    if (placingKind !== null) {
+      setTouchNavigation(true);
+    }
     placingKind = null;
+    clearPlacementPreview();
     stackContainer.classList.remove("placing-line");
     if (priceChart && crosshairModeBeforePlacing !== null) {
       priceChart.applyOptions({ crosshair: { mode: crosshairModeBeforePlacing } });
@@ -739,37 +811,108 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       crosshairModeBeforePlacing = priceChart.options().crosshair.mode;
       priceChart.applyOptions({ crosshair: { mode: CrosshairMode.Normal } });
     }
+    if (placingKind === null) {
+      setTouchNavigation(false);
+    }
     placingKind = kind;
     stackContainer.classList.add("placing-line");
   };
 
-  const handlePlacementClick = (chart: IChartApi, param: MouseEventParams): void => {
-    if (!placingKind || !param.point || bars.length === 0) {
-      return;
+  /** The line being placed, were it dropped at this point of a pane. */
+  const placementAnchorAt = (chart: IChartApi, x: number, y: number): ChartLineAnchor | null => {
+    if (!placingKind || bars.length === 0) {
+      return null;
     }
 
-    let anchor: ChartLineAnchor;
     if (placingKind === "horizontal") {
       // Price levels only mean something on the price pane.
       if (chart !== priceChart || !priceSeries) {
-        return;
+        return null;
       }
-      const price = priceSeries.coordinateToPrice(param.point.y);
-      if (price === null || !Number.isFinite(price)) {
-        return;
-      }
-      anchor = { kind: "horizontal", price };
-    } else {
-      const logical = param.logical ?? chart.timeScale().coordinateToLogical(param.point.x);
-      if (logical === null) {
-        return;
-      }
-      anchor = { kind: "vertical", timeMs: bars[clamp(0, bars.length - 1, Math.round(logical))].t };
+      const price = priceSeries.coordinateToPrice(y);
+      return price === null || !Number.isFinite(price) ? null : { kind: "horizontal", price };
+    }
+
+    const logical = chart.timeScale().coordinateToLogical(x);
+    if (logical === null) {
+      return null;
+    }
+    return { kind: "vertical", timeMs: bars[clamp(0, bars.length - 1, Math.round(logical))].t };
+  };
+
+  const handlePlacementClick = (chart: IChartApi, param: MouseEventParams): void => {
+    // Touch placement commits on lift instead, before this click arrives.
+    if (!param.point) {
+      return;
+    }
+    const anchor = placementAnchorAt(chart, param.point.x, param.point.y);
+    if (!anchor) {
+      return;
     }
 
     endLinePlacement();
     deps.onLinePlaced?.(anchor);
   };
+
+  /**
+   * Read off the price pane wherever the finger is in the stack: every pane
+   * shares its x, and a drag that strays off its top or bottom pins the line to
+   * that edge rather than losing it.
+   */
+  const touchPlacementAnchor = (event: PointerEvent): ChartLineAnchor | null => {
+    if (!priceChart) {
+      return null;
+    }
+    const rect = priceContainer.getBoundingClientRect();
+    const x = clamp(0, plotWidth(priceChart, priceContainer), event.clientX - rect.left);
+    const y = clamp(0, rect.height - priceChart.timeScale().height(), event.clientY - rect.top);
+    return placementAnchorAt(priceChart, x, y);
+  };
+
+  const handlePlacementPointerDown = (event: PointerEvent): void => {
+    if (!placingKind || event.pointerType === "mouse" || !event.isPrimary
+      || !(event.target as Element).closest(".price-chart, .lower-panes")) {
+      return;
+    }
+    const anchor = touchPlacementAnchor(event);
+    if (!anchor) {
+      return;
+    }
+    placementPointerId = event.pointerId;
+    placementPreview = anchor;
+    syncPlacementPreview();
+  };
+
+  const handlePlacementPointerMove = (event: PointerEvent): void => {
+    if (event.pointerId !== placementPointerId) {
+      return;
+    }
+    placementPreview = touchPlacementAnchor(event) ?? placementPreview;
+    syncPlacementPreview();
+  };
+
+  const handlePlacementPointerUp = (event: PointerEvent): void => {
+    if (event.pointerId !== placementPointerId) {
+      return;
+    }
+    const anchor = placementPreview;
+    endLinePlacement();
+    if (anchor) {
+      deps.onLinePlaced?.(anchor);
+    }
+  };
+
+  /** The system took the touch away (e.g. a gesture); stay in placing mode. */
+  const handlePlacementPointerCancel = (event: PointerEvent): void => {
+    if (event.pointerId === placementPointerId) {
+      clearPlacementPreview();
+    }
+  };
+
+  stackContainer.addEventListener("pointerdown", handlePlacementPointerDown);
+  stackContainer.addEventListener("pointermove", handlePlacementPointerMove);
+  stackContainer.addEventListener("pointerup", handlePlacementPointerUp);
+  stackContainer.addEventListener("pointercancel", handlePlacementPointerCancel);
 
   const lineAt = (clientX: number, clientY: number, tolerancePx = LINE_HIT_TOLERANCE_PX): string | null => {
     const hits: Array<{ id: string; distance: number }> = [];
@@ -1202,6 +1345,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       // Any reference line died with the series it was drawn on.
       previousCloseLine = null;
       horizontalLineHandles = [];
+      placementPreviewHandle = null;
     }
 
     chartType = nextChartType;
@@ -1762,6 +1906,10 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       container.querySelector(".chart-line-overlay")?.remove();
     }
     endLinePlacement();
+    stackContainer.removeEventListener("pointerdown", handlePlacementPointerDown);
+    stackContainer.removeEventListener("pointermove", handlePlacementPointerMove);
+    stackContainer.removeEventListener("pointerup", handlePlacementPointerUp);
+    stackContainer.removeEventListener("pointercancel", handlePlacementPointerCancel);
 
     legendEl?.remove();
     legendEl = null;

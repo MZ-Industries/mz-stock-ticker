@@ -765,6 +765,39 @@ p {
   margin-left: -1px;
 }
 
+.chart-vline.preview {
+  background: none;
+  border-left: 2px dashed rgba(226, 232, 240, 0.9);
+}
+
+.chart-vline-label {
+  position: absolute;
+  top: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(226, 232, 240, 0.9);
+  color: var(--bg);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chart-vline-label.right {
+  margin-left: 6px;
+}
+
+.chart-vline-label.left {
+  transform: translateX(calc(-100% - 6px));
+}
+
+/* A drag places the line rather than scrolling whatever is under the finger. */
+.chart-stack.placing-line .price-chart,
+.chart-stack.placing-line .price-chart *,
+.chart-stack.placing-line .lower-panes,
+.chart-stack.placing-line .lower-panes * {
+  touch-action: none;
+}
+
 /* lightweight-charts sets inline cursors on its canvases. */
 .chart-stack.placing-line .price-chart,
 .chart-stack.placing-line .price-chart *,
