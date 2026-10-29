@@ -722,6 +722,59 @@ p {
   background: var(--border);
 }
 
+.line-value {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 2px 8px 4px;
+}
+
+.line-value-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.line-value-row {
+  display: flex;
+  gap: 6px;
+}
+
+.line-value-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #223247;
+  border-radius: 8px;
+  background: rgba(2, 6, 16, 0.8);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color-scheme: dark;
+}
+
+.line-value-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.line-value-row input[aria-invalid="true"] {
+  border-color: var(--down);
+}
+
+.line-value-set {
+  padding: 6px 10px;
+  border: 1px solid #223247;
+  border-radius: 8px;
+  background: rgba(45, 212, 191, 0.1);
+  color: var(--accent);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .line-swatches {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

@@ -75,6 +75,14 @@ export const APP_TEMPLATE = `
   <div class="line-context-menu hidden" id="line-context-menu" role="menu" aria-label="Line options">
     <div class="line-swatches" id="line-swatches" role="group" aria-label="Line colour"></div>
     <div class="line-divider" role="separator"></div>
+    <form class="line-value" id="line-value-form" novalidate>
+      <label class="line-value-label" id="line-value-label" for="line-value-input">Price</label>
+      <div class="line-value-row">
+        <input id="line-value-input" type="text" spellcheck="false" autocomplete="off" />
+        <button type="submit" class="line-value-set">Set</button>
+      </div>
+    </form>
+    <div class="line-divider" role="separator"></div>
     <button type="button" class="line-option danger" role="menuitem" data-line-remove>Clear line</button>
   </div>
   <div class="prefs-overlay hidden" id="prefs-overlay">

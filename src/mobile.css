@@ -223,6 +223,16 @@ html.is-mobile .mobile-reset {
     z-index: 70;
   }
 
+  /* Rides above the on-screen keyboard while its value field has focus. */
+  html.is-mobile .line-context-menu {
+    bottom: max(calc(64px + env(safe-area-inset-bottom)), calc(var(--keyboard-inset, 0px) + 12px));
+  }
+
+  /* Anything smaller and iOS zooms the page in on focus. */
+  html.is-mobile .line-value-row input {
+    font-size: 16px;
+  }
+
   html.is-mobile .study-menu {
     max-height: 60dvh;
   }

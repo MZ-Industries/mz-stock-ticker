@@ -459,6 +459,24 @@ export function getNyParts(timestampMs: number): { date: string; hour: number; m
   };
 }
 
+/**
+ * The instant a New York wall-clock time names, whatever the viewer's own
+ * zone. Corrects a UTC guess by how far off New York reads it, twice so a guess
+ * that straddles a DST change still settles.
+ */
+export function nyWallTimeToMs(date: string, hour: number, minute: number): number {
+  const [year, month, day] = date.split("-").map(Number);
+  const wanted = Date.UTC(year, month - 1, day, hour, minute);
+  let guess = wanted;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const ny = getNyParts(guess);
+    const [nyYear, nyMonth, nyDay] = ny.date.split("-").map(Number);
+    // Some engines print midnight as hour 24 of the same day.
+    guess += wanted - Date.UTC(nyYear, nyMonth - 1, nyDay, ny.hour % 24, ny.minute);
+  }
+  return guess;
+}
+
 export function isRegularMarketHour(bar: AggregateBar): boolean {
   const ny = getNyParts(bar.t);
   const totalMinutes = ny.hour * 60 + ny.minute;

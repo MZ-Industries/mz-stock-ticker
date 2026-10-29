@@ -8,9 +8,9 @@ import {
 } from "./chartPanel";
 import { els } from "./elements";
 import { IS_MOBILE } from "./platform";
-import { persistPrefs, state } from "./store";
+import { currentAggregationPreset, persistPrefs, state } from "./store";
 import { alignDropdown } from "./ui";
-import { escapeHtml } from "./utils";
+import { escapeHtml, getNyParts, nyWallTimeToMs } from "./utils";
 import type { ChartLine, ChartLineAnchor, ChartLineKind } from "./types";
 
 const LINE_COLORS = [
@@ -98,6 +98,76 @@ export function addChartLine(anchor: ChartLineAnchor): void {
   writeLines(ticker, [...chartLinesFor(ticker), line]);
 }
 
+/** Daily and longer bars have no time of day worth editing. */
+function editsDateOnly(): boolean {
+  return currentAggregationPreset().timespan === "day";
+}
+
+/** What the menu's value field shows for a line, in the format its input takes. */
+function lineValueText(line: ChartLine): string {
+  if (line.kind === "horizontal") {
+    // Sub-dollar symbols need more than cents to tell levels apart.
+    return String(Number(line.price.toFixed(Math.abs(line.price) < 1 ? 4 : 2)));
+  }
+  const ny = getNyParts(line.timeMs);
+  if (editsDateOnly()) {
+    return ny.date;
+  }
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${ny.date}T${pad(ny.hour % 24)}:${pad(ny.minute)}`;
+}
+
+/** The anchor typed into the menu's value field, or null if it doesn't parse. */
+function parseLineValue(line: ChartLine, raw: string): ChartLine | null {
+  const text = raw.trim();
+  if (line.kind === "horizontal") {
+    const price = Number(text.replace(/,/g, ""));
+    return text !== "" && Number.isFinite(price) ? { ...line, price } : null;
+  }
+
+  const match = /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}):(\d{2}))?$/.exec(text);
+  if (!match) {
+    return null;
+  }
+  // A date alone lands at New York midday, inside that day's bar whether the
+  // provider stamps it at midnight or at the open.
+  const [, date, hour = "12", minute = "0"] = match;
+  const timeMs = nyWallTimeToMs(date, Number(hour), Number(minute));
+  return Number.isFinite(timeMs) ? { ...line, timeMs } : null;
+}
+
+function syncLineValueField(line: ChartLine): void {
+  const input = els.lineValueInputEl;
+  input.removeAttribute("aria-invalid");
+  if (line.kind === "horizontal") {
+    els.lineValueLabelEl.textContent = "Price";
+    input.type = "text";
+    input.inputMode = "decimal";
+  } else {
+    els.lineValueLabelEl.textContent = editsDateOnly() ? "Date (New York)" : "Date & time (New York)";
+    input.type = editsDateOnly() ? "date" : "datetime-local";
+    input.inputMode = "";
+  }
+  input.value = lineValueText(line);
+}
+
+/**
+ * iOS lays the keyboard over the page rather than shrinking it, which would
+ * bury the bottom-sheet menu while its value field is being typed into.
+ */
+function trackKeyboardInset(): void {
+  const viewport = window.visualViewport;
+  if (!viewport) {
+    return;
+  }
+  const sync = () => {
+    const inset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+    els.lineContextMenuEl.style.setProperty("--keyboard-inset", `${inset}px`);
+  };
+  viewport.addEventListener("resize", sync);
+  viewport.addEventListener("scroll", sync);
+}
+
 function closeContextMenu(): void {
   menuTarget = null;
   els.lineContextMenuEl.classList.add("hidden");
@@ -115,6 +185,7 @@ function openContextMenu(id: string, clientX: number, clientY: number): void {
     <button type="button" class="line-swatch${color === line.color ? " selected" : ""}" data-line-color="${color}"
       style="--swatch:${color}" title="${escapeHtml(name)}" aria-label="${escapeHtml(name)}"></button>
   `).join("");
+  syncLineValueField(line);
 
   const menu = els.lineContextMenuEl;
   menu.classList.remove("hidden");
@@ -264,7 +335,34 @@ export function initChartLines(): void {
 
   // A pan or zoom would leave the menu pointing at empty chart.
   els.chartStackEl.addEventListener("wheel", closeContextMenu, { passive: true });
-  window.addEventListener("resize", closeContextMenu);
+  // ...but the on-screen keyboard opening for the value field resizes the
+  // window too, and must not take the menu away with it.
+  window.addEventListener("resize", () => {
+    if (!els.lineContextMenuEl.contains(document.activeElement)) {
+      closeContextMenu();
+    }
+  });
+
+  els.lineValueFormEl.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const line = menuTarget && chartLinesFor(menuTarget.ticker).find((item) => item.id === menuTarget?.id);
+    const edited = line ? parseLineValue(line, els.lineValueInputEl.value) : null;
+    if (!edited) {
+      els.lineValueInputEl.setAttribute("aria-invalid", "true");
+      return;
+    }
+    els.lineValueInputEl.blur();
+    updateMenuTarget(() => edited);
+    closeContextMenu();
+  });
+
+  els.lineValueInputEl.addEventListener("input", () => {
+    els.lineValueInputEl.removeAttribute("aria-invalid");
+  });
+
+  if (IS_MOBILE) {
+    trackKeyboardInset();
+  }
 
   els.lineContextMenuEl.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;

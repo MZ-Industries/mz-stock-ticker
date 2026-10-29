@@ -15,6 +15,7 @@ import {
   normalizeTicker,
   normalizeVisibleRangesByViewKey,
   normalizeWatchlistSymbols,
+  nyWallTimeToMs,
   parseRetryAfterSeconds,
   splitPaneWeights,
 } from "../utils";
@@ -238,5 +239,18 @@ describe("lowerPaneHeights", () => {
     const heights = lowerPaneHeights(517, [0.2, 5, 1, 0.3], 40, 84);
     expect(heights.reduce((sum, height) => sum + height, 0)).toBeCloseTo(517);
     expect(Math.min(...heights)).toBeGreaterThanOrEqual(40);
+  });
+});
+
+describe("nyWallTimeToMs", () => {
+  it("reads the wall time in New York on either side of DST", () => {
+    expect(new Date(nyWallTimeToMs("2026-07-15", 9, 30)).toISOString()).toBe("2026-07-15T13:30:00.000Z");
+    expect(new Date(nyWallTimeToMs("2026-01-15", 9, 30)).toISOString()).toBe("2026-01-15T14:30:00.000Z");
+  });
+
+  it("handles midnight and the day of a DST change", () => {
+    expect(new Date(nyWallTimeToMs("2026-03-08", 0, 0)).toISOString()).toBe("2026-03-08T05:00:00.000Z");
+    expect(new Date(nyWallTimeToMs("2026-03-08", 12, 0)).toISOString()).toBe("2026-03-08T16:00:00.000Z");
+    expect(new Date(nyWallTimeToMs("2026-11-01", 16, 0)).toISOString()).toBe("2026-11-01T21:00:00.000Z");
   });
 });

@@ -13,6 +13,9 @@ export type AppElements = {
   lineDropdownEl: HTMLDivElement;
   lineContextMenuEl: HTMLDivElement;
   lineSwatchesEl: HTMLDivElement;
+  lineValueFormEl: HTMLFormElement;
+  lineValueLabelEl: HTMLLabelElement;
+  lineValueInputEl: HTMLInputElement;
   studyToggleEl: HTMLButtonElement;
   studyMenuEl: HTMLDivElement;
   studyFilterEl: HTMLInputElement;
@@ -78,6 +81,9 @@ export function initElements(root: ParentNode = document): AppElements {
     lineDropdownEl: root.querySelector("#line-dropdown") as HTMLDivElement,
     lineContextMenuEl: root.querySelector("#line-context-menu") as HTMLDivElement,
     lineSwatchesEl: root.querySelector("#line-swatches") as HTMLDivElement,
+    lineValueFormEl: root.querySelector("#line-value-form") as HTMLFormElement,
+    lineValueLabelEl: root.querySelector("#line-value-label") as HTMLLabelElement,
+    lineValueInputEl: root.querySelector("#line-value-input") as HTMLInputElement,
     studyToggleEl: root.querySelector("#study-toggle") as HTMLButtonElement,
     studyMenuEl: root.querySelector("#study-menu") as HTMLDivElement,
     studyFilterEl: root.querySelector("#study-filter") as HTMLInputElement,
