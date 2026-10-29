@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.8...v0.9.0) (2026-10-29)
+
+
+### Features
+
+* drag to place chart lines on touch screens ([0b90328](https://github.com/MZ-Industries/mz-stock-ticker/commit/0b90328addbd3ccfb1bb370fe8697e4aa96df07a))
+* set a chart line's exact price or date/time from its menu ([b0a2c2f](https://github.com/MZ-Industries/mz-stock-ticker/commit/b0a2c2fa0af3ea7f267da1a6ec5ee78777545e05))
+
+
+### Bug Fixes
+
+* show the crosshair's date on panes without a time axis ([a396b05](https://github.com/MZ-Industries/mz-stock-ticker/commit/a396b057102cd82fd5936080618a8ec39258488b))
+
 ## [0.8.8](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.7...v0.8.8) (2026-10-15)
 
 
