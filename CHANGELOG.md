@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.10.0...v0.10.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **ci:** write latest.json once, after every build has uploaded ([9cb5f9f](https://github.com/MZ-Industries/mz-stock-ticker/commit/9cb5f9ffcc036def0b3b0437bc136dc762bf52cd))
+
 ## [0.10.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.9.0...v0.10.0) (2026-11-07)
 
 
