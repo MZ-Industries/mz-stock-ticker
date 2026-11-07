@@ -160,8 +160,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Updater artifact signing; tauri-action also uploads latest.json,
-          # which the in-app updater fetches from the latest published release.
+          # Updater artifact signing. latest.json is written once by the publish
+          # job instead (see includeUpdaterJson below).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # macOS code signing + notarization (only used on the macOS runners)
@@ -174,6 +174,10 @@ jobs:
         with:
           releaseId: ${{ needs.release-please.outputs.release_id }}
           args: ${{ matrix.args }}
+          # Each leg would read latest.json, add its platform and re-upload it.
+          # Legs that finish together overwrite each other's entries - v0.10.0
+          # shipped with no macOS platforms, so Macs could not update.
+          includeUpdaterJson: false
 
       # tauri-action notarizes and staples the .app, but leaves the .dmg wrapper
       # signed-but-unnotarized — which makes Gatekeeper warn when a user opens the
@@ -218,6 +222,67 @@ jobs:
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     steps:
+      # Built here, after every leg has uploaded, so no platform can be lost to
+      # a concurrent write. The in-app updater fetches this file from the latest
+      # published release; each entry's signature is its bundle's .sig verbatim.
+      - name: Write latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ needs.release-please.outputs.release_id }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$REPO/releases/$RELEASE_ID/assets" --jq '.[] | [.id, .name] | @tsv' > assets.tsv
+          mkdir sigs
+          while IFS=$'\t' read -r id name; do
+            case "$name" in
+              *.sig) gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$id" > "sigs/$name" ;;
+            esac
+          done < assets.tsv
+          python3 - <<'PY'
+          import datetime, json, os, re, sys
+
+          repo, tag = os.environ["REPO"], os.environ["TAG"]
+          names = [line.split("\t", 1)[1].rstrip("\n") for line in open("assets.tsv")]
+
+          # updater platform keys -> pattern of the bundle that serves them
+          targets = {
+              ("darwin-aarch64", "darwin-aarch64-app"): r"_aarch64\.app\.tar\.gz$",
+              ("darwin-x86_64", "darwin-x86_64-app"): r"_x64\.app\.tar\.gz$",
+              ("windows-x86_64", "windows-x86_64-msi"): r"_x64_en-US\.msi$",
+              ("windows-x86_64-nsis",): r"_x64-setup\.exe$",
+              ("linux-x86_64", "linux-x86_64-appimage"): r"_amd64\.AppImage$",
+              ("linux-x86_64-deb",): r"_amd64\.deb$",
+              ("linux-x86_64-rpm",): r"\.x86_64\.rpm$",
+          }
+
+          platforms, missing = {}, []
+          for keys, pattern in targets.items():
+              bundle = next((n for n in names if re.search(pattern, n) and f"{n}.sig" in names), None)
+              if bundle is None:
+                  missing.append(keys[0])
+                  continue
+              entry = {
+                  "signature": open(f"sigs/{bundle}.sig").read(),
+                  "url": f"https://github.com/{repo}/releases/download/{tag}/{bundle}",
+              }
+              for key in keys:
+                  platforms[key] = entry
+
+          if missing:
+              sys.exit(f"No signed updater bundle for: {', '.join(missing)}")
+
+          json.dump({
+              "version": tag.lstrip("v"),
+              "notes": "",
+              "pub_date": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+              "platforms": platforms,
+          }, open("latest.json", "w"), indent=2)
+          PY
+          cat latest.json
+          gh release upload "$TAG" latest.json --clobber -R "$REPO"
+
       - name: Mark release as published
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
