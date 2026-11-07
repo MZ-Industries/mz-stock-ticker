@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.9.0...v0.10.0) (2026-11-07)
+
+
+### Features
+
+* show the headline change over the selected range ([8369f04](https://github.com/MZ-Industries/mz-stock-ticker/commit/8369f04ed46004b8ba797dd465c21c7cd194f65b))
+
 ## [0.9.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.8.8...v0.9.0) (2026-10-29)
 
 
