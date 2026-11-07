@@ -6,8 +6,8 @@ import {
   RANGES,
 } from "./constants";
 import { els } from "./elements";
-import { getExtendedStripFromBars, isCandleIntervalRelevant } from "./market";
-import { state } from "./store";
+import { getExtendedStripFromBars, getRangeChange, isCandleIntervalRelevant } from "./market";
+import { currentChartViewKey, state } from "./store";
 import { STUDIES } from "./studies";
 import { escapeHtml, fmtCompact, fmtNumber, fmtPct, formatRelativeTime } from "./utils";
 import type { NewsItem } from "./types";
@@ -34,11 +34,16 @@ export function updateHeadline(): void {
   } = state;
 
   const snapshot = latestSnapshotsByTicker.get(selectedTicker);
-  const hasPostMarket = Number.isFinite(snapshot?.post_market_price)
+  // Extended-hours quotes only mean anything against today's session, so the
+  // strip is a 1D thing; longer ranges show the change across the range.
+  const isIntraday = state.selectedRange.label === "1D";
+  const hasPostMarket = isIntraday
+    && Number.isFinite(snapshot?.post_market_price)
     && Number.isFinite(snapshot?.post_market_change_percent)
     && Number.isFinite(snapshot?.price)
     && Number.isFinite(snapshot?.change_percent);
-  const hasPreMarket = !hasPostMarket
+  const hasPreMarket = isIntraday
+    && !hasPostMarket
     && Number.isFinite(snapshot?.pre_market_price)
     && Number.isFinite(snapshot?.pre_market_change_percent)
     && Number.isFinite(snapshot?.price)
@@ -95,6 +100,21 @@ export function updateHeadline(): void {
   }
 
   let displayPrice: number = Number.isFinite(snapshot?.price) ? (snapshot?.price as number) : Number.NaN;
+
+  if (!isIntraday) {
+    // Until the new range's bars land, `latestBars` still belongs to the old
+    // selection; leave the headline alone rather than measure the wrong window.
+    if (state.loadedViewKey !== currentChartViewKey()) {
+      return;
+    }
+    const rangePrice = Number.isFinite(displayPrice) ? displayPrice : (latestBars[latestBars.length - 1]?.c ?? Number.NaN);
+    const rangeChange = getRangeChange({ selectedRange: state.selectedRange, latestBars, currentPrice: rangePrice });
+    if (rangeChange) {
+      renderHeadlineChange(rangePrice, rangeChange.delta, rangeChange.pct);
+      return;
+    }
+  }
+
   let displayPct: number = Number.isFinite(snapshot?.change_percent)
     ? (snapshot?.change_percent as number)
     : Number.NaN;
@@ -114,11 +134,15 @@ export function updateHeadline(): void {
     return;
   }
 
+  renderHeadlineChange(displayPrice, displayDelta, displayPct);
+}
+
+function renderHeadlineChange(price: number, delta: number, pct: number): void {
   els.headlinePriceEl.classList.remove("hidden");
-  els.headlinePriceEl.textContent = fmtNumber(displayPrice);
+  els.headlinePriceEl.textContent = fmtNumber(price);
   els.headlineChangeEl.classList.remove("hidden");
-  els.headlineChangeEl.textContent = `${displayDelta >= 0 ? "+" : ""}${fmtNumber(displayDelta)} (${fmtPct(displayPct)})`;
-  els.headlineChangeEl.className = `subtle ${displayDelta >= 0 ? "up" : "down"}`;
+  els.headlineChangeEl.textContent = `${delta >= 0 ? "+" : ""}${fmtNumber(delta)} (${fmtPct(pct)})`;
+  els.headlineChangeEl.className = `subtle ${delta >= 0 ? "up" : "down"}`;
   els.extendedStripEl.classList.add("hidden");
 }
 

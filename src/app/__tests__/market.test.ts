@@ -5,6 +5,7 @@ import {
   collectRegularSessions,
   effectiveAggregationPreset,
   getBarDateRange,
+  getRangeChange,
   isCandleIntervalRelevant,
 } from "../market";
 import type { AggregateBar, RangePreset } from "../types";
@@ -92,5 +93,27 @@ describe("backfillChunkDays", () => {
     expect(backfillChunkDays({ multiplier: 5, timespan: "minute" })).toBe(15);
     expect(backfillChunkDays({ multiplier: 1, timespan: "hour" })).toBe(60);
     expect(backfillChunkDays({ multiplier: 1, timespan: "day" })).toBe(730);
+  });
+});
+
+describe("getRangeChange", () => {
+  const ohlc = (t: number, o: number, c: number): AggregateBar => ({ t, o, h: Math.max(o, c), l: Math.min(o, c), c, v: 100 });
+
+  it("measures from the first in-range bar's open, ignoring scroll-back history", () => {
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const bars = [
+      ohlc(now - 20 * day, 50, 55), // older than 1W: backfilled history
+      ohlc(now - 3 * day, 100, 102),
+      ohlc(now - day, 104, 108),
+    ];
+    const change = getRangeChange({ selectedRange: preset("1W"), latestBars: bars, currentPrice: 110 });
+    expect(change?.delta).toBeCloseTo(10);
+    expect(change?.pct).toBeCloseTo(10);
+  });
+
+  it("returns null without bars or a usable price", () => {
+    expect(getRangeChange({ selectedRange: preset("1M"), latestBars: [], currentPrice: 10 })).toBeNull();
+    expect(getRangeChange({ selectedRange: preset("1M"), latestBars: [bar(NY_1000)], currentPrice: Number.NaN })).toBeNull();
   });
 });

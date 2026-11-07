@@ -225,6 +225,33 @@ export function getBarDateRange(selectedRange: RangePreset): { from: string; to:
   };
 }
 
+/**
+ * Change across a multi-day range: from the open of the first bar inside the
+ * window to `currentPrice`. Bars older than the window (scroll-back history)
+ * don't move the baseline, so the number matches the range button, not however
+ * far back the user has panned.
+ */
+export function getRangeChange(params: {
+  selectedRange: RangePreset;
+  latestBars: AggregateBar[];
+  currentPrice: number;
+}): { delta: number; pct: number } | null {
+  const { selectedRange, latestBars, currentPrice } = params;
+  if (!Number.isFinite(currentPrice) || latestBars.length === 0) {
+    return null;
+  }
+
+  const { from } = getBarDateRange(selectedRange);
+  const firstInRange = latestBars.find((bar) => getNyParts(bar.t).date >= from) ?? latestBars[0];
+  const base = firstInRange.o;
+  if (!Number.isFinite(base) || base === 0) {
+    return null;
+  }
+
+  const delta = currentPrice - base;
+  return { delta, pct: (delta / base) * 100 };
+}
+
 export function clearSessionShading(container: HTMLDivElement): void {
   const existing = container.querySelector(".session-shade-overlay");
   if (existing) {
