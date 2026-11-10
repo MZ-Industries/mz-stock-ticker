@@ -47,7 +47,13 @@ export const CHART_TYPE_LABELS: Record<ChartType, string> = {
   candlestick: "Candles",
   line: "Line",
 };
-export const MOVING_AVERAGE_PERIOD_OPTIONS = [20, 50, 200] as const;
+export const MOVING_AVERAGE_PERIOD_OPTIONS = [50, 200] as const;
+/** The user-picked moving average, shown beside the fixed ones. */
+export const CUSTOM_MOVING_AVERAGE_DEFAULT_PERIOD = 20;
+export const CUSTOM_MOVING_AVERAGE_MIN_PERIOD = 2;
+export const CUSTOM_MOVING_AVERAGE_MAX_PERIOD = 1000;
+/** Suggestions offered in the custom MA dropdown; any period can be typed. */
+export const CUSTOM_MOVING_AVERAGE_SUGGESTIONS = [5, 9, 10, 13, 20, 21, 30, 100, 150] as const;
 
 export const RIGHT_SCALE_WIDTH_PX = 72;
 export const AUTO_REFRESH_PROGRESS_WINDOW_MS = 60_000;

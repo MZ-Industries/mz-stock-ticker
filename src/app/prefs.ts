@@ -2,6 +2,9 @@ import { Store } from "@tauri-apps/plugin-store";
 import {
   CANDLE_INTERVAL_OPTIONS,
   CHART_TYPES,
+  CUSTOM_MOVING_AVERAGE_DEFAULT_PERIOD,
+  CUSTOM_MOVING_AVERAGE_MAX_PERIOD,
+  CUSTOM_MOVING_AVERAGE_MIN_PERIOD,
   DEFAULT_WATCHLIST,
   defaultPrefs,
   MAX_STORED_VISIBLE_RANGES,
@@ -17,6 +20,7 @@ import {
   normalizeMovingAveragePeriods,
   normalizeVisibleRangesByViewKey,
   normalizeWatchlistSymbols,
+  parseCustomMovingAveragePeriod,
   parseStoredJson,
 } from "./utils";
 import type { AppPrefs } from "./types";
@@ -53,10 +57,25 @@ export async function initPrefs(): Promise<void> {
   state.selectedTicker = watchlistSymbols.includes(prefs.ticker) ? prefs.ticker : watchlistSymbols[0];
   state.selectedRange = RANGES.find((item) => item.label === prefs.rangeLabel) ?? RANGES[2];
   state.selectedChartType = CHART_TYPES.includes(prefs.chartType) ? prefs.chartType : "candlestick";
+  // MA 20 used to be a fixed toggle; it now lives on as the custom MA's
+  // starting point, carrying over whether it was switched on.
+  const storedCustomPeriod = parseCustomMovingAveragePeriod(
+    prefs.customMovingAveragePeriod,
+    CUSTOM_MOVING_AVERAGE_MIN_PERIOD,
+    CUSTOM_MOVING_AVERAGE_MAX_PERIOD,
+  );
+  const legacyMa20 = Array.isArray(prefs.movingAveragePeriods) && prefs.movingAveragePeriods.includes(20);
+  state.customMovingAverage = {
+    period: storedCustomPeriod ?? CUSTOM_MOVING_AVERAGE_DEFAULT_PERIOD,
+    enabled: storedCustomPeriod === null ? legacyMa20 : prefs.customMovingAverageEnabled === true,
+  };
+  prefs.customMovingAveragePeriod = state.customMovingAverage.period;
+  prefs.customMovingAverageEnabled = state.customMovingAverage.enabled;
   state.selectedMovingAveragePeriods = normalizeMovingAveragePeriods(
     prefs.movingAveragePeriods,
     MOVING_AVERAGE_PERIOD_OPTIONS,
-    defaultPrefs.movingAveragePeriods ?? [],
+    // A saved [20] alone is not "nothing chosen" - don't add MA 200 to it.
+    legacyMa20 && storedCustomPeriod === null ? [] : defaultPrefs.movingAveragePeriods ?? [],
   );
   prefs.movingAveragePeriods = [...state.selectedMovingAveragePeriods];
   state.selectedStudyKeys = normalizeStudyKeys(prefs.studyKeys);

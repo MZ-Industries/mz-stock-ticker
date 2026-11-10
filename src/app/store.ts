@@ -1,5 +1,11 @@
 import type { Store } from "@tauri-apps/plugin-store";
-import { CANDLE_INTERVAL_OPTIONS, DEFAULT_WATCHLIST, defaultPrefs, RANGES } from "./constants";
+import {
+  CANDLE_INTERVAL_OPTIONS,
+  CUSTOM_MOVING_AVERAGE_DEFAULT_PERIOD,
+  DEFAULT_WATCHLIST,
+  defaultPrefs,
+  RANGES,
+} from "./constants";
 import { effectiveAggregationPreset } from "./market";
 import { parseRetryAfterSeconds } from "./utils";
 import type {
@@ -22,6 +28,7 @@ export const state = {
   selectedChartType: "candlestick" as ChartType,
   selectedCandleIntervalKey: "5m",
   selectedMovingAveragePeriods: [...(defaultPrefs.movingAveragePeriods ?? [])],
+  customMovingAverage: { period: CUSTOM_MOVING_AVERAGE_DEFAULT_PERIOD, enabled: false },
   selectedStudyKeys: [] as string[],
   watchlistSymbols: [...DEFAULT_WATCHLIST],
   latestBars: [] as AggregateBar[],
@@ -72,6 +79,15 @@ export function isApiCooldownActive(): boolean {
 }
 
 /** Key the saved visible range is stored under (ticker + range preset). */
+/** Every moving average to draw: the fixed ones plus the custom one when on. */
+export function activeMovingAveragePeriods(): number[] {
+  const periods = [...state.selectedMovingAveragePeriods];
+  if (state.customMovingAverage.enabled) {
+    periods.push(state.customMovingAverage.period);
+  }
+  return [...new Set(periods)].sort((a, b) => a - b);
+}
+
 export function currentChartViewKey(): string {
   return `${state.selectedTicker}:${state.selectedRange.label}`;
 }

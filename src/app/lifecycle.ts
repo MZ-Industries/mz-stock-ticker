@@ -16,6 +16,8 @@ import {
 import { disposeCharts, getVisibleLogicalRange, renderCharts, resetChartView } from "./chartPanel";
 import {
   CANDLE_INTERVAL_OPTIONS,
+  CUSTOM_MOVING_AVERAGE_MAX_PERIOD,
+  CUSTOM_MOVING_AVERAGE_MIN_PERIOD,
   MAX_WATCHLIST_SYMBOLS,
   MOVING_AVERAGE_PERIOD_OPTIONS,
   NEWS_REFRESH_MS,
@@ -37,7 +39,7 @@ import { debugLog, isApiCooldownActive, persistPrefs, state } from "./store";
 import { alignDropdown, filterStudyMenu, initStudyMenu, renderControls, renderStats, syncStudyMenuState } from "./ui";
 import { initUpdater, isUpdateDialogOpen } from "./updater";
 import { getStudy } from "./studies";
-import { normalizeTicker } from "./utils";
+import { normalizeTicker, parseCustomMovingAveragePeriod } from "./utils";
 import { cycleWatchlistBadgeMode, renderWatchlistRows, setupWatchlistDragAndDrop } from "./watchlist";
 import type { ChartType } from "./types";
 
@@ -219,8 +221,59 @@ export function registerGlobalEventHandlers(): void {
     await startStream();
   });
 
+  const applyCustomMovingAverage = (next: { period: number; enabled: boolean }): void => {
+    state.customMovingAverage = next;
+    state.prefs.customMovingAveragePeriod = next.period;
+    state.prefs.customMovingAverageEnabled = next.enabled;
+    persistPrefs();
+    renderControls();
+    renderCharts();
+  };
+
+  els.maGroupEl.addEventListener("change", (event) => {
+    const input = (event.target as HTMLElement).closest("[data-ma-custom-input]") as HTMLInputElement | null;
+    if (!input) {
+      return;
+    }
+
+    const period = parseCustomMovingAveragePeriod(
+      input.value,
+      CUSTOM_MOVING_AVERAGE_MIN_PERIOD,
+      CUSTOM_MOVING_AVERAGE_MAX_PERIOD,
+    );
+    if (period === null) {
+      input.value = String(state.customMovingAverage.period);
+      return;
+    }
+
+    // Picking a period is asking to see it.
+    applyCustomMovingAverage({ period, enabled: true });
+  });
+
+  els.maGroupEl.addEventListener("keydown", (event) => {
+    const input = (event.target as HTMLElement).closest("[data-ma-custom-input]") as HTMLInputElement | null;
+    if (!input) {
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      input.value = String(state.customMovingAverage.period);
+      input.blur();
+    }
+  });
+
   els.maGroupEl.addEventListener("click", (event) => {
-    const button = (event.target as HTMLElement).closest("[data-ma-period]") as HTMLButtonElement | null;
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-ma-custom-toggle]")) {
+      applyCustomMovingAverage({ ...state.customMovingAverage, enabled: !state.customMovingAverage.enabled });
+      return;
+    }
+
+    const button = target.closest("[data-ma-period]") as HTMLButtonElement | null;
     if (!button) {
       return;
     }

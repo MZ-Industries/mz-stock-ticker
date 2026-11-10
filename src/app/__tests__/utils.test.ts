@@ -11,6 +11,7 @@ import {
   normalizeChartLinesByTicker,
   normalizeLowerPaneWeights,
   normalizeMovingAveragePeriods,
+  parseCustomMovingAveragePeriod,
   normalizeStoredRatio,
   normalizeTicker,
   normalizeVisibleRangesByViewKey,
@@ -64,6 +65,19 @@ describe("normalizeWatchlistSymbols", () => {
     expect(normalizeWatchlistSymbols(["aapl", "AAPL", "msft", 42, "bad ticker"]))
       .toEqual(["AAPL", "MSFT"]);
     expect(normalizeWatchlistSymbols("nope")).toEqual([]);
+  });
+});
+
+describe("parseCustomMovingAveragePeriod", () => {
+  it("accepts whole periods inside the bounds, typed or stored", () => {
+    expect(parseCustomMovingAveragePeriod(" 21 ", 2, 1000)).toBe(21);
+    expect(parseCustomMovingAveragePeriod(100, 2, 1000)).toBe(100);
+  });
+
+  it("rejects anything else", () => {
+    for (const input of ["", "abc", "1", "1001", "12.5", undefined, null]) {
+      expect(parseCustomMovingAveragePeriod(input, 2, 1000)).toBeNull();
+    }
   });
 });
 

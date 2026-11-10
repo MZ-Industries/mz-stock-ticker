@@ -118,6 +118,9 @@ export type AppPrefs = {
   chartType: ChartType;
   candleIntervalKey?: string;
   movingAveragePeriods?: number[];
+  /** Period of the user-picked moving average. */
+  customMovingAveragePeriod?: number;
+  customMovingAverageEnabled?: boolean;
   /** Enabled study keys, in the order they were turned on. */
   studyKeys?: string[];
   watchlistSymbols?: string[];

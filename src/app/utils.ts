@@ -86,6 +86,15 @@ export function normalizeMovingAveragePeriods(
   return [...new Set(normalized)].sort((a, b) => a - b);
 }
 
+/** A whole-number period inside the custom MA's bounds, or null. */
+export function parseCustomMovingAveragePeriod(input: unknown, min: number, max: number): number | null {
+  const value = typeof input === "string" ? Number(input.trim()) : Number(input);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    return null;
+  }
+  return value;
+}
+
 export function parseStoredJson(key: string): unknown | null {
   try {
     const raw = localStorage.getItem(key);

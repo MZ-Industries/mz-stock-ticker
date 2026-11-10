@@ -3,7 +3,7 @@ import { RIGHT_SCALE_WIDTH_PX } from "./constants";
 import { els } from "./elements";
 import { clearSessionShading, renderSessionShading } from "./market";
 import { getStoredVisibleRange, onVisibleRangeChange } from "./prefs";
-import { currentAggregationPreset, currentChartResetKey, currentChartViewKey, persistPrefs, state } from "./store";
+import { activeMovingAveragePeriods, currentAggregationPreset, currentChartResetKey, currentChartViewKey, persistPrefs, state } from "./store";
 import { getNyParts } from "./utils";
 import type { AggregateBar, ChartLine, ChartLineAnchor, ChartLineKind } from "./types";
 
@@ -135,7 +135,7 @@ export function renderCharts(prependedBars?: number): void {
     chartType: state.selectedChartType,
     timespan: currentAggregationPreset().timespan,
     multiplier: currentAggregationPreset().multiplier,
-    movingAveragePeriods: state.selectedMovingAveragePeriods,
+    movingAveragePeriods: activeMovingAveragePeriods(),
     studyKeys: state.selectedStudyKeys,
     previousClose: previousCloseForChart(),
     lines,

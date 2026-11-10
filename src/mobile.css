@@ -292,3 +292,8 @@ html.is-mobile .mobile-reset {
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
+
+/* Under 16px iOS zooms the page when the field takes focus. */
+html.is-mobile .ma-custom-input {
+  font-size: 16px;
+}

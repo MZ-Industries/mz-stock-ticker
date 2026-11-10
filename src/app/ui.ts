@@ -2,6 +2,9 @@ import {
   CANDLE_INTERVAL_OPTIONS,
   CHART_TYPE_LABELS,
   CHART_TYPES,
+  CUSTOM_MOVING_AVERAGE_MAX_PERIOD,
+  CUSTOM_MOVING_AVERAGE_MIN_PERIOD,
+  CUSTOM_MOVING_AVERAGE_SUGGESTIONS,
   MOVING_AVERAGE_PERIOD_OPTIONS,
   RANGES,
 } from "./constants";
@@ -146,6 +149,40 @@ function renderHeadlineChange(price: number, delta: number, pct: number): void {
   els.extendedStripEl.classList.add("hidden");
 }
 
+/**
+ * The custom MA comes first, where MA 20 used to be, then the fixed periods.
+ * The group is built once and then only restyled: rebuilding it would throw
+ * away the custom field mid-edit whenever anything else re-renders controls.
+ */
+function renderMovingAverageGroup(): void {
+  const group = els.maGroupEl;
+  if (!group.querySelector(".ma-custom")) {
+    const suggestions = CUSTOM_MOVING_AVERAGE_SUGGESTIONS.map((period) => `<option value="${period}"></option>`).join("");
+    group.innerHTML = `<div class="pill ma-custom">`
+      + `<button type="button" class="ma-custom-toggle" data-ma-custom-toggle aria-pressed="false" title="Show custom moving average">MA</button>`
+      + `<input class="ma-custom-input" data-ma-custom-input type="text" inputmode="numeric" list="ma-custom-suggestions"`
+      + ` maxlength="4" size="3" autocomplete="off" spellcheck="false" aria-label="Custom moving average period"`
+      + ` title="Period: ${CUSTOM_MOVING_AVERAGE_MIN_PERIOD}-${CUSTOM_MOVING_AVERAGE_MAX_PERIOD} bars" />`
+      + `<datalist id="ma-custom-suggestions">${suggestions}</datalist>`
+      + `</div>`
+      + MOVING_AVERAGE_PERIOD_OPTIONS.map(
+        (period) => `<button class="pill" data-ma-period="${period}">MA ${period}</button>`,
+      ).join("");
+  }
+
+  for (const button of group.querySelectorAll<HTMLButtonElement>("[data-ma-period]")) {
+    button.classList.toggle("active", state.selectedMovingAveragePeriods.includes(Number(button.dataset.maPeriod)));
+  }
+
+  const custom = state.customMovingAverage;
+  group.querySelector(".ma-custom")!.classList.toggle("active", custom.enabled);
+  group.querySelector("[data-ma-custom-toggle]")!.setAttribute("aria-pressed", String(custom.enabled));
+  const input = group.querySelector<HTMLInputElement>("[data-ma-custom-input]")!;
+  if (document.activeElement !== input) {
+    input.value = String(custom.period);
+  }
+}
+
 export function renderControls(): void {
   els.rangeGroupEl.innerHTML = RANGES.map((item) => {
     const active = item.label === state.selectedRange.label ? "active" : "";
@@ -163,10 +200,7 @@ export function renderControls(): void {
     els.intervalGroupEl.innerHTML = "";
   }
 
-  els.maGroupEl.innerHTML = MOVING_AVERAGE_PERIOD_OPTIONS.map((period) => {
-    const active = state.selectedMovingAveragePeriods.includes(period) ? "active" : "";
-    return `<button class="pill ${active}" data-ma-period="${period}">MA ${period}</button>`;
-  }).join("");
+  renderMovingAverageGroup();
 
   const activeTypeIndex = Math.max(0, CHART_TYPES.indexOf(state.selectedChartType));
   els.typeGroupEl.style.setProperty("--switch-index", String(activeTypeIndex));
