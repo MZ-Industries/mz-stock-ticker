@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.10.1...v0.11.0) (2026-11-10)
+
+
+### Features
+
+* **chart:** custom moving average in place of MA 20 ([dcb44de](https://github.com/MZ-Industries/mz-stock-ticker/commit/dcb44de7fd057a056849598413edb2be7ffcaaac))
+
+
+### Bug Fixes
+
+* **chart:** keep the zoomed window when switching symbols ([c9f3d4d](https://github.com/MZ-Industries/mz-stock-ticker/commit/c9f3d4d8fadd3352964b9ff393c4b4df3d0d9f52))
+
 ## [0.10.1](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.10.0...v0.10.1) (2026-11-07)
 
 
