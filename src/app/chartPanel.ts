@@ -146,6 +146,7 @@ export function renderCharts(prependedBars?: number): void {
     // view has already been drawn.
     viewKey: state.loadedViewKey || currentChartViewKey(),
     resetKey: state.loadedResetKey || currentChartResetKey(),
+    symbol: chartedTicker(),
   });
 }
 

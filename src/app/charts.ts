@@ -136,6 +136,24 @@ export type ChartRenderRequest = {
    * time scale.
    */
   resetKey: string;
+  /**
+   * The symbol the bars belong to - the leading part of `resetKey`. A reset
+   * that only swaps the symbol keeps the window the user was looking at.
+   */
+  symbol: string;
+};
+
+/**
+ * The visible window pinned to wall-clock times rather than bar indices, so it
+ * can be carried onto another symbol whose series has a different length.
+ */
+type TimeWindow = {
+  fromMs: number;
+  /** How far the left edge sits before the first visible bar (0..1 bars). */
+  fromInset: number;
+  toMs: number;
+  /** Right edge past the newest bar; set when the view is pinned to it. */
+  liveEdgePadding: number | null;
 };
 
 export type ChartController = {
@@ -425,6 +443,9 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   let studyKeys: string[] = [];
   let viewKey = "";
   let resetKey: string | null = null;
+  let symbol = "";
+  /** A carried window still waiting on older history to fill its left edge. */
+  let pendingWindow: TimeWindow | null = null;
   let newestSeriesTime: UTCTimestamp | null = null;
   let overlayFrame: number | null = null;
   let previousClose: number | null = null;
@@ -1055,6 +1076,12 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       if (!inSync) {
         target.timeScale().setVisibleLogicalRange(range);
       }
+    }
+
+    // A scroll of the user's own overrides a carried window still waiting on
+    // history; our own range changes land inside the suppress window.
+    if (pendingWindow && Date.now() - lastViewResetAtMs >= VIEW_RESET_SUPPRESS_MS) {
+      pendingWindow = null;
     }
 
     onVisibleRangeChange(viewKey, range);
@@ -1762,6 +1789,69 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     applyDefaultView();
   };
 
+  /** First bar at or after `timeMs`, or `bars.length` when there is none. */
+  const indexAtOrAfter = (timeMs: number): number => {
+    let low = 0;
+    let high = bars.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (bars[mid].t < timeMs) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    return low;
+  };
+
+  const captureTimeWindow = (): TimeWindow | null => {
+    const range = priceChart?.timeScale().getVisibleLogicalRange() ?? null;
+    if (!range || bars.length === 0) {
+      return null;
+    }
+
+    const lastIndex = bars.length - 1;
+    const fromIndex = clamp(0, lastIndex, Math.ceil(range.from));
+    const toIndex = clamp(0, lastIndex, Math.floor(range.to));
+    return {
+      fromMs: bars[fromIndex].t,
+      fromInset: clamp(0, 1, fromIndex - range.from),
+      toMs: bars[toIndex].t,
+      liveEdgePadding: range.to >= lastIndex ? range.to - lastIndex : null,
+    };
+  };
+
+  /**
+   * Maps a captured window onto the current bars. Returns false when it does
+   * not fit, so the caller can fall back to the default view.
+   */
+  const applyTimeWindow = (target: TimeWindow): boolean => {
+    if (bars.length === 0) {
+      return false;
+    }
+
+    const lastIndex = bars.length - 1;
+    const fromIndex = indexAtOrAfter(target.fromMs);
+    const to = target.liveEdgePadding !== null
+      ? lastIndex + target.liveEdgePadding
+      : indexAtOrAfter(target.toMs + 1) - 1 + 0.5;
+    // This series starts later than the window did: open from its first bar
+    // and fetch the history that would fill the rest.
+    const startsLate = fromIndex === 0 && bars[0].t > target.fromMs;
+    const from = startsLate ? -0.5 : fromIndex - target.fromInset;
+
+    if (!(to - from >= 2) || from > lastIndex) {
+      return false;
+    }
+
+    setRangeOnAllCharts({ from, to });
+    pendingWindow = startsLate && deps.onNeedOlderData ? target : null;
+    if (pendingWindow) {
+      deps.onNeedOlderData!();
+    }
+    return true;
+  };
+
   const render = (request: ChartRenderRequest): void => {
     if (request.bars.length === 0) {
       return;
@@ -1778,8 +1868,18 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       applyTimeAxisOptions();
     }
 
+    // Switching symbol on the same range and interval keeps the window on
+    // screen - e.g. a 1D chart zoomed out to a few sessions stays that way.
+    // It has to be read off the outgoing bars, before they are replaced.
+    const symbolOnlyChange = !firstRender
+      && resetKey !== null
+      && request.symbol !== symbol
+      && request.resetKey.slice(request.symbol.length) === resetKey.slice(symbol.length);
+    const carriedWindow = symbolOnlyChange && request.resetKey !== resetKey ? captureTimeWindow() : null;
+
     bars = request.bars;
     viewKey = request.viewKey;
+    symbol = request.symbol;
     previousClose = request.previousClose;
     lines = request.lines;
     defaultVisibleRange = request.defaultVisibleRange;
@@ -1798,7 +1898,19 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
 
     applyData();
 
-    if (preservedRange) {
+    if (preservedRange && pendingWindow) {
+      // History requested for a carried window has landed - one more try at
+      // the window itself rather than keeping the clamped view.
+      const target = pendingWindow;
+      pendingWindow = null;
+      lastViewResetAtMs = Date.now();
+      if (!applyTimeWindow(target)) {
+        setRangeOnAllCharts({
+          from: preservedRange.from + prepended,
+          to: preservedRange.to + prepended,
+        });
+      }
+    } else if (preservedRange) {
       lastViewResetAtMs = Date.now();
       setRangeOnAllCharts({
         from: preservedRange.from + prepended,
@@ -1809,7 +1921,16 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       // A periodic data refresh must leave the time scale exactly where the user
       // left it - that is what used to make the chart jump and rescale.
       resetKey = request.resetKey;
-      restoreView(firstRender ? "stored" : "default");
+      pendingWindow = null;
+      if (carriedWindow) {
+        lastViewResetAtMs = Date.now();
+        resetPriceScales();
+        if (!applyTimeWindow(carriedWindow)) {
+          applyDefaultView();
+        }
+      } else {
+        restoreView(firstRender ? "stored" : "default");
+      }
     }
 
     // A data refresh can change which dates the visible indices point at
@@ -1963,6 +2084,8 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     movingAverageSeries.clear();
     movingAverageAppliedStyle.clear();
     resetKey = null;
+    symbol = "";
+    pendingWindow = null;
     newestSeriesTime = null;
     previousClose = null;
     previousCloseLine = null;
