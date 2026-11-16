@@ -1008,14 +1008,15 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       return;
     }
     const timeScale = priceChart.timeScale();
-    const plotWidth = timeScale.width();
-    if (plotWidth <= 0) {
+    // Not timeScale().width(): that is 0 on a pane whose time axis is hidden.
+    const plotPx = plotWidth(priceChart, priceContainer);
+    if (plotPx <= 0) {
       return;
     }
     const scale = touchDistance(event.touches) / pinch.distance;
-    const width = clamp(PINCH_MIN_VISIBLE_BARS, plotWidth / PINCH_MIN_BAR_SPACING_PX, pinch.width / scale);
+    const width = clamp(PINCH_MIN_VISIBLE_BARS, plotPx / PINCH_MIN_BAR_SPACING_PX, pinch.width / scale);
     // Keep the anchor bar under the midpoint, so moving both fingers also pans.
-    const from = pinch.anchor - (touchMidX(event.touches) / plotWidth) * width;
+    const from = pinch.anchor - (touchMidX(event.touches) / plotPx) * width;
     timeScale.setVisibleLogicalRange({ from, to: from + width });
   };
 
