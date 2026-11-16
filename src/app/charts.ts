@@ -42,6 +42,10 @@ const MOVING_AVERAGE_COLORS = ["#60a5fa", "#f59e0b", "#a78bfa", "#fb7185"] as co
 // panes would just bounce rounding noise back and forth forever.
 const RANGE_SYNC_EPSILON = 1e-4;
 
+/** Pinch-zoom limits: the fewest bars on screen, and the tightest bar spacing (the library's own minimum). */
+const PINCH_MIN_VISIBLE_BARS = 5;
+const PINCH_MIN_BAR_SPACING_PX = 0.5;
+
 // Scrolling to within this many bars of the data's left edge asks for older
 // history. The suppression window keeps a programmatic view reset (fitContent,
 // restored zoom) from looking like the user scrolled back.
@@ -834,7 +838,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     for (const chart of allCharts()) {
       chart.applyOptions({
         handleScroll: { horzTouchDrag: enabled, vertTouchDrag: enabled },
-        handleScale: { pinch: enabled, axisPressedMouseMove: enabled },
+        handleScale: { axisPressedMouseMove: enabled },
       });
     }
   };
@@ -970,6 +974,64 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   stackContainer.addEventListener("pointerup", handlePlacementPointerUp);
   stackContainer.addEventListener("pointercancel", handlePlacementPointerCancel);
 
+  /**
+   * Two-finger pinch on the time axis. The library's own pinch nudges bar
+   * spacing by a fixed step per move, which zooms in fine but zooms out only
+   * ~30% for a full pinch. Here the visible window scales with the finger
+   * spread instead, anchored on the bar under the fingers' midpoint.
+   */
+  let pinch: { distance: number; anchor: number; width: number } | null = null;
+
+  const touchDistance = (touches: TouchList): number =>
+    Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+
+  const touchMidX = (touches: TouchList): number =>
+    (touches[0].clientX + touches[1].clientX) / 2 - priceContainer.getBoundingClientRect().left;
+
+  const handlePinchStart = (event: TouchEvent): void => {
+    pinch = null;
+    if (event.touches.length !== 2 || placingKind !== null || !priceChart) {
+      return;
+    }
+    const timeScale = priceChart.timeScale();
+    const range = timeScale.getVisibleLogicalRange();
+    const anchor = timeScale.coordinateToLogical(touchMidX(event.touches));
+    const distance = touchDistance(event.touches);
+    if (!range || anchor === null || distance <= 0) {
+      return;
+    }
+    pinch = { distance, anchor, width: range.to - range.from };
+  };
+
+  const handlePinchMove = (event: TouchEvent): void => {
+    if (!pinch || event.touches.length !== 2 || !priceChart) {
+      return;
+    }
+    const timeScale = priceChart.timeScale();
+    const plotWidth = timeScale.width();
+    if (plotWidth <= 0) {
+      return;
+    }
+    const scale = touchDistance(event.touches) / pinch.distance;
+    const width = clamp(PINCH_MIN_VISIBLE_BARS, plotWidth / PINCH_MIN_BAR_SPACING_PX, pinch.width / scale);
+    // Keep the anchor bar under the midpoint, so moving both fingers also pans.
+    const from = pinch.anchor - (touchMidX(event.touches) / plotWidth) * width;
+    timeScale.setVisibleLogicalRange({ from, to: from + width });
+  };
+
+  const handlePinchEnd = (event: TouchEvent): void => {
+    if (event.touches.length !== 2) {
+      pinch = null;
+    } else {
+      handlePinchStart(event);
+    }
+  };
+
+  stackContainer.addEventListener("touchstart", handlePinchStart, { passive: true });
+  stackContainer.addEventListener("touchmove", handlePinchMove, { passive: true });
+  stackContainer.addEventListener("touchend", handlePinchEnd, { passive: true });
+  stackContainer.addEventListener("touchcancel", handlePinchEnd, { passive: true });
+
   const lineAt = (clientX: number, clientY: number, tolerancePx = LINE_HIT_TOLERANCE_PX): string | null => {
     const hits: Array<{ id: string; distance: number }> = [];
 
@@ -1091,6 +1153,8 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   };
 
   const basePaneOptions = (faintGrid: boolean) => ({
+    // Replaced by our own proportional pinch (see handlePinchMove).
+    handleScale: { pinch: false },
     layout: {
       attributionLogo: false,
       background: { color: CHART_BACKGROUND },
