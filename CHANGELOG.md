@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.11.0...v0.11.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **chart:** proportional pinch-to-zoom so mobile can zoom out ([41cc4a1](https://github.com/MZ-Industries/mz-stock-ticker/commit/41cc4a11c0cdb9030eb5dbce3d20a1ba5f0ca201))
+
 ## [0.11.0](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.10.1...v0.11.0) (2026-11-10)
 
 
