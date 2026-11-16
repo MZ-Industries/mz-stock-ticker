@@ -28,6 +28,7 @@ import {
   normalizeLowerPaneWeights,
   splitPaneWeights,
 } from "./utils";
+import { IS_MOBILE } from "./platform";
 import { getStudy, type StudyPlot, type StudyRange, type StudyResult } from "./studies";
 import type { AggregateBar, ChartLine, ChartLineAnchor, ChartLineKind, ChartType, RangePreset } from "./types";
 
@@ -42,9 +43,15 @@ const MOVING_AVERAGE_COLORS = ["#60a5fa", "#f59e0b", "#a78bfa", "#fb7185"] as co
 // panes would just bounce rounding noise back and forth forever.
 const RANGE_SYNC_EPSILON = 1e-4;
 
-/** Pinch-zoom limits: the fewest bars on screen, and the tightest bar spacing (the library's own minimum). */
+/** Pinch-zoom floor: the fewest bars on screen. */
 const PINCH_MIN_VISIBLE_BARS = 5;
-const PINCH_MIN_BAR_SPACING_PX = 0.5;
+
+/**
+ * The tightest bar spacing, which caps how far out a chart can zoom. The
+ * library's 0.5px default lets a desktop-width 1D chart show about a week of
+ * minute bars but a phone under two sessions, so phones go tighter.
+ */
+const minBarSpacingPx = (): number => (IS_MOBILE ? 0.1 : 0.5);
 
 // Scrolling to within this many bars of the data's left edge asks for older
 // history. The suppression window keeps a programmatic view reset (fitContent,
@@ -1014,7 +1021,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       return;
     }
     const scale = touchDistance(event.touches) / pinch.distance;
-    const width = clamp(PINCH_MIN_VISIBLE_BARS, plotPx / PINCH_MIN_BAR_SPACING_PX, pinch.width / scale);
+    const width = clamp(PINCH_MIN_VISIBLE_BARS, plotPx / minBarSpacingPx(), pinch.width / scale);
     // Keep the anchor bar under the midpoint, so moving both fingers also pans.
     const from = pinch.anchor - (touchMidX(event.touches) / plotPx) * width;
     timeScale.setVisibleLogicalRange({ from, to: from + width });
@@ -1069,6 +1076,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   const timeAxisOptions = (visible: boolean) => ({
     timeScale: {
       borderVisible: false,
+      minBarSpacing: minBarSpacingPx(),
       visible,
       timeVisible: timespan !== "day",
       tickMarkFormatter: (time: Time, tickMarkType: TickMarkType) =>
