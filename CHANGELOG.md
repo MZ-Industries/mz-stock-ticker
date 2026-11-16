@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.3](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.11.2...v0.11.3) (2026-11-16)
+
+
+### Bug Fixes
+
+* **chart:** let phones zoom out as far as desktop on 1D ([db37dde](https://github.com/MZ-Industries/mz-stock-ticker/commit/db37dde7ce815ae4345e38e72bf069bca21b739c))
+
 ## [0.11.2](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.11.1...v0.11.2) (2026-11-16)
 
 
