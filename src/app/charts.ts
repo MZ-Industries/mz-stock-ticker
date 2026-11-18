@@ -1076,7 +1076,6 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
   const timeAxisOptions = (visible: boolean) => ({
     timeScale: {
       borderVisible: false,
-      minBarSpacing: minBarSpacingPx(),
       visible,
       timeVisible: timespan !== "day",
       tickMarkFormatter: (time: Time, tickMarkType: TickMarkType) =>
@@ -1086,6 +1085,18 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
       timeFormatter: (time: Time) => formatTooltipTime(time, timespan),
     },
   });
+
+  /**
+   * timeAxisOptions plus what is set only once, at creation. minBarSpacing must
+   * stay out of the re-applied options: applying it makes the library re-apply
+   * bar spacing and fire a range change synchronously, which re-runs
+   * syncMultiDayView - and with the window's edge on a day boundary (pre-market)
+   * that flips back and forth forever, freezing the app.
+   */
+  const initialTimeAxisOptions = (visible: boolean) => {
+    const options = timeAxisOptions(visible);
+    return { ...options, timeScale: { ...options.timeScale, minBarSpacing: minBarSpacingPx() } };
+  };
 
   /** Only the bottom-most pane carries a time axis; the rest would just repeat it. */
   const applyTimeAxisOptions = (): void => {
@@ -1337,7 +1348,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
         minimumWidth: rightScaleWidthPx,
         scaleMargins: STUDY_SCALE_MARGINS,
       },
-      ...timeAxisOptions(false),
+      ...initialTimeAxisOptions(false),
     });
 
     const legendEl = document.createElement("div");
@@ -1416,7 +1427,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
     priceChart = createChart(priceContainer, {
       ...basePaneOptions(false),
       rightPriceScale: { borderVisible: false, minimumWidth: rightScaleWidthPx },
-      ...timeAxisOptions(false),
+      ...initialTimeAxisOptions(false),
     });
 
     volumeChart = createChart(volumeContainer, {
@@ -1426,7 +1437,7 @@ export function createChartController(deps: ChartControllerDeps): ChartControlle
         minimumWidth: rightScaleWidthPx,
         scaleMargins: { top: 0.2, bottom: 0.05 },
       },
-      ...timeAxisOptions(true),
+      ...initialTimeAxisOptions(true),
     });
 
     volumeSeries = volumeChart.addSeries(HistogramSeries, { priceFormat: { type: "volume" } });
