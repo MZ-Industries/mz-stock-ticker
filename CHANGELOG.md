@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.4](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.11.3...v0.11.4) (2026-11-18)
+
+
+### Bug Fixes
+
+* **chart:** app froze when the 1D window started on a day boundary ([9a46f29](https://github.com/MZ-Industries/mz-stock-ticker/commit/9a46f2974fdb7a05da138b2709bb3241845f2f81))
+
 ## [0.11.3](https://github.com/MZ-Industries/mz-stock-ticker/compare/v0.11.2...v0.11.3) (2026-11-16)
 
 
